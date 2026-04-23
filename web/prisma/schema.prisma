@@ -43,4 +43,14 @@ model Project {
   githubRepoUrl       String?
   narrativeReadiness  String?
   blockers            String?
+
+  tags                Tag[]         @relation("ProjectTags")
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  name      String    @unique
+
+  projects  Project[] @relation("ProjectTags")
 }

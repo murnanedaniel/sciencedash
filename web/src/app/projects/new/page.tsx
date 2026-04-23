@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ProjectStatus, ProjectType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { parseTags } from "@/lib/tags";
 
 async function createProject(formData: FormData) {
   "use server";
@@ -10,6 +11,9 @@ async function createProject(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   const type = String(formData.get("type") ?? "").trim() as ProjectType;
   const status = String(formData.get("status") ?? "").trim() as ProjectStatus;
+
+  const tagsInput = String(formData.get("tags") ?? "").trim();
+  const tags = parseTags(tagsInput);
 
   const hypothesis = String(formData.get("hypothesis") ?? "").trim() || null;
   const figuresOfMerit = String(formData.get("figuresOfMerit") ?? "").trim() || null;
@@ -29,6 +33,12 @@ async function createProject(formData: FormData) {
       title,
       type,
       status,
+      tags: {
+        connectOrCreate: tags.map((name) => ({
+          where: { name },
+          create: { name },
+        })),
+      },
       hypothesis,
       figuresOfMerit,
       timeline,
@@ -90,6 +100,18 @@ export default function NewProjectPage() {
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="tags">Tags</label>
+            <input
+              id="tags"
+              name="tags"
+              placeholder="e.g. tracking, hl-lhc, misalignment"
+            />
+            <div className="muted small">
+              Tip: comma or space separated; stored normalized (e.g. “HL-LHC” → “hl-lhc”).
             </div>
           </div>
 

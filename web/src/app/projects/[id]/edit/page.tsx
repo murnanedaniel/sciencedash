@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { ProjectStatus, ProjectType } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { parseTags } from "@/lib/tags";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -14,6 +15,9 @@ async function updateProject(id: string, formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   const type = String(formData.get("type") ?? "").trim() as ProjectType;
   const status = String(formData.get("status") ?? "").trim() as ProjectStatus;
+
+  const tagsInput = String(formData.get("tags") ?? "").trim();
+  const tags = parseTags(tagsInput);
 
   const hypothesis = String(formData.get("hypothesis") ?? "").trim() || null;
   const figuresOfMerit = String(formData.get("figuresOfMerit") ?? "").trim() || null;
@@ -34,6 +38,13 @@ async function updateProject(id: string, formData: FormData) {
       title,
       type,
       status,
+      tags: {
+        set: [],
+        connectOrCreate: tags.map((name) => ({
+          where: { name },
+          create: { name },
+        })),
+      },
       hypothesis,
       figuresOfMerit,
       timeline,
@@ -52,8 +63,13 @@ async function updateProject(id: string, formData: FormData) {
 export default async function EditProjectPage({ params }: Props) {
   const { id } = await params;
 
-  const project = await prisma.project.findUnique({ where: { id } });
+  const project = await prisma.project.findUnique({
+    where: { id },
+    include: { tags: true },
+  });
   if (!project) notFound();
+
+  const tagsValue = project.tags.map((t) => t.name).join(", ");
 
   return (
     <div className="container">
@@ -96,6 +112,14 @@ export default async function EditProjectPage({ params }: Props) {
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="tags">Tags</label>
+            <input id="tags" name="tags" defaultValue={tagsValue} />
+            <div className="muted small">
+              Tip: comma or space separated; stored normalized.
             </div>
           </div>
 

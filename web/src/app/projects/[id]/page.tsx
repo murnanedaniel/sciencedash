@@ -29,7 +29,10 @@ async function deleteProject(id: string) {
 export default async function ProjectDetailPage({ params }: Props) {
   const { id } = await params;
 
-  const project = await prisma.project.findUnique({ where: { id } });
+  const project = await prisma.project.findUnique({
+    where: { id },
+    include: { tags: true },
+  });
   if (!project) notFound();
 
   return (
@@ -58,6 +61,23 @@ export default async function ProjectDetailPage({ params }: Props) {
       </header>
 
       <main className="stack">
+        {project.tags.length ? (
+          <div className="card">
+            <h2 className="sectionTitle">Tags</h2>
+            <div className="rowWrap">
+              {project.tags.map((t) => (
+                <Link
+                  key={t.id}
+                  className="pill"
+                  href={`/projects?tags=${encodeURIComponent(t.name)}`}
+                >
+                  #{t.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {project.githubRepoUrl ? (
           <div className="card">
             <div className="muted small">GitHub repo</div>
