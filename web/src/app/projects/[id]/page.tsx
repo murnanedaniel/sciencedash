@@ -7,6 +7,18 @@ type Props = {
   params: Promise<{ id: string }>;
 };
 
+function formatUtc(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    hour12: false,
+  }).format(date);
+}
+
 async function deleteProject(id: string) {
   "use server";
   await prisma.project.delete({ where: { id } });
@@ -31,7 +43,7 @@ export default async function ProjectDetailPage({ params }: Props) {
             </span>
             <span className="pill pillMuted">{project.status}</span>
             <span className="muted small">
-              Updated {project.updatedAt.toLocaleString()}
+              Updated {formatUtc(project.updatedAt)} UTC
             </span>
           </div>
         </div>
@@ -93,7 +105,7 @@ export default async function ProjectDetailPage({ params }: Props) {
 
         <div className="card danger">
           <h2 className="sectionTitle">Danger zone</h2>
-          <form action={async () => deleteProject(project.id)}>
+          <form action={deleteProject.bind(null, project.id)}>
             <button className="button buttonDanger" type="submit">
               Delete project
             </button>

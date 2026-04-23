@@ -70,7 +70,7 @@ export default async function EditProjectPage({ params }: Props) {
       </header>
 
       <main className="card">
-        <form className="stack" action={async (fd) => updateProject(project.id, fd)}>
+        <form className="stack" action={updateProject.bind(null, project.id)}>
           <div className="field">
             <label htmlFor="title">Title</label>
             <input id="title" name="title" defaultValue={project.title} required />

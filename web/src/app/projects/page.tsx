@@ -1,6 +1,18 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
+function formatUtc(date: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    hour12: false,
+  }).format(date);
+}
+
 export default async function ProjectsPage() {
   const projects = await prisma.project.findMany({
     orderBy: [{ updatedAt: "desc" }],
@@ -51,7 +63,7 @@ export default async function ProjectsPage() {
                   <span className="pill pillMuted">{p.status}</span>
                 </div>
                 <div className="muted small">
-                  Updated {p.updatedAt.toLocaleString()}
+                  Updated {formatUtc(p.updatedAt)} UTC
                 </div>
                 {p.nextSteps ? (
                   <p className="preview">{p.nextSteps}</p>
