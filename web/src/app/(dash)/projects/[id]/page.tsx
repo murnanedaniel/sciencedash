@@ -21,6 +21,7 @@ import {
 } from "@/lib/server/projectActions";
 import { spawnPaperFromHypothesis } from "@/lib/server/paperActions";
 import { createCheckIn } from "@/lib/server/checkInActions";
+import { RunAiReviewButton } from "@/components/RunAiReviewButton";
 import {
   ProjectStatus,
   NarrativeReadiness,
@@ -277,13 +278,25 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
               )}
             </div>
 
+            <div className="card">
+              <h2 className="sectionTitle">AI critical review</h2>
+              <p className="muted small" style={{ marginBottom: 10 }}>
+                §16.6 — critical, not polite. Returns actionable patches you accept one-by-one.
+              </p>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                <RunAiReviewButton projectId={project.id} />
+                <form action={toggleAiAutoReview.bind(null, project.id)}>
+                  <button className="button buttonSecondary" type="submit">
+                    {project.aiAutoReviewEnabled
+                      ? "Disable AI auto-review on stall"
+                      : "Enable AI auto-review on stall"}
+                  </button>
+                </form>
+              </div>
+            </div>
+
             <div className="card danger">
               <h2 className="sectionTitle">Danger zone</h2>
-              <form action={toggleAiAutoReview.bind(null, project.id)} style={{ marginBottom: 10 }}>
-                <button className="button buttonSecondary" type="submit">
-                  {project.aiAutoReviewEnabled ? "Disable AI auto-review" : "Enable AI auto-review"}
-                </button>
-              </form>
               <form action={deleteProject.bind(null, project.id)}>
                 <button className="button buttonDanger" type="submit">Delete project</button>
               </form>

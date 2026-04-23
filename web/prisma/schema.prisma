@@ -113,6 +113,24 @@ enum NoteKind {
   other
 }
 
+enum JobKind {
+  wandb_pull
+  github_pull
+  stall_detect
+  ai_review
+  ai_skeleton
+  ai_audit
+  arxiv_fetch
+  other
+}
+
+enum PromptKind {
+  critical_review
+  paper_skeleton
+  section_polish
+  outer_loop_audit
+}
+
 model Project {
   id                  String        @id @default(cuid())
   createdAt           DateTime      @default(now())
@@ -328,6 +346,28 @@ model NoteProject {
   project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@id([noteId, projectId])
+}
+
+model JobRun {
+  id           String    @id @default(cuid())
+  kind         JobKind
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  ok           Boolean?
+  error        String?
+  payloadJson  String?
+
+  projectId    String?
+}
+
+model PromptTemplate {
+  id         String      @id @default(cuid())
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  kind       PromptKind  @unique
+  version    Int         @default(1)
+  bodyMd     String
 }
 
 model Decision {

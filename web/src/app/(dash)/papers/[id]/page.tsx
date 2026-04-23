@@ -13,6 +13,7 @@ import {
   deleteArtifact,
   deletePaper,
 } from "@/lib/server/paperActions";
+import { RunAiSkeletonButton, RunAiPolishButton } from "@/components/RunAiSkeletonButton";
 import {
   PaperStatus,
   PaperSectionKind,
@@ -67,6 +68,7 @@ export default async function PaperDetailPage({ params }: Props) {
         </div>
         <div className="row">
           <Link className="button buttonSecondary" href="/papers">Back</Link>
+          <RunAiSkeletonButton paperId={paper.id} />
           <a className="button buttonSecondary" href={`/papers/${paper.id}/export.tex`}>
             Export .tex
           </a>
@@ -103,11 +105,14 @@ export default async function PaperDetailPage({ params }: Props) {
                     />
                   </div>
                 </div>
-                <form action={deleteSection.bind(null, s.id)}>
-                  <button type="submit" className="button buttonSecondary" style={{ padding: "4px 8px", fontSize: 12 }}>
-                    Delete section
-                  </button>
-                </form>
+                <div className="row" style={{ gap: 6 }}>
+                  <RunAiPolishButton sectionId={s.id} />
+                  <form action={deleteSection.bind(null, s.id)}>
+                    <button type="submit" className="button buttonSecondary" style={{ padding: "4px 8px", fontSize: 12 }}>
+                      Delete
+                    </button>
+                  </form>
+                </div>
               </div>
               <div style={{ marginTop: 10 }}>
                 <InlineField

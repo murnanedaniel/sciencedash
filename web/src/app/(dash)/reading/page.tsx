@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createNote, deleteNote, patchNoteField } from "@/lib/server/noteActions";
 import { daysAgoLabel } from "@/lib/format";
 import { InlineField } from "@/components/InlineField";
+import { ArxivAutofill } from "@/components/ArxivAutofill";
 import { NoteKind } from "@/generated/prisma/client";
 
 export default async function ReadingPage() {
@@ -29,7 +30,7 @@ export default async function ReadingPage() {
         <form action={createNote} className="row" style={{ flexWrap: "wrap", gap: 10 }}>
           <div className="field" style={{ flex: "1 1 320px" }}>
             <label>URL (arXiv or any)</label>
-            <input name="url" placeholder="https://arxiv.org/abs/2501.12345" />
+            <ArxivAutofill />
           </div>
           <div className="field" style={{ minWidth: 140 }}>
             <label>Kind</label>
