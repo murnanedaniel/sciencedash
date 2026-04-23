@@ -84,6 +84,35 @@ enum DecisionKind {
   other
 }
 
+enum PaperStatus {
+  skeleton
+  draft
+  internal
+  arxiv
+  submitted
+  published
+}
+
+enum PaperSectionKind {
+  intro
+  related
+  method
+  experiments
+  results
+  discussion
+  conclusion
+  figure_list
+  custom
+}
+
+enum NoteKind {
+  paper
+  book
+  talk
+  thread
+  other
+}
+
 model Project {
   id                  String        @id @default(cuid())
   createdAt           DateTime      @default(now())
@@ -116,6 +145,8 @@ model Project {
   checkIns            CheckIn[]
   artifacts           Artifact[]
   decisions           Decision[]
+  papers              Paper[]
+  notes               NoteProject[]
 }
 
 model Tag {
@@ -144,6 +175,7 @@ model Hypothesis {
   resolvedAt              DateTime?
 
   runs                    Run[]
+  papers                  HypothesisPaper[]
 }
 
 model Run {
@@ -212,6 +244,90 @@ model Artifact {
 
   runId       String?
   run         Run?          @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  paperId     String?
+  paper       Paper?        @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  paperSectionId String?
+  paperSection PaperSection? @relation(fields: [paperSectionId], references: [id], onDelete: SetNull)
+}
+
+model Paper {
+  id                  String        @id @default(cuid())
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  title               String
+  abstract            String?
+  status              PaperStatus   @default(skeleton)
+
+  arxivId             String?
+  doi                 String?
+  venue               String?
+  plannedVenue        String?
+  submittedAt         DateTime?
+  publishedAt         DateTime?
+
+  primaryProjectId    String?
+  primaryProject      Project?      @relation(fields: [primaryProjectId], references: [id], onDelete: SetNull)
+
+  sections            PaperSection[]
+  hypotheses          HypothesisPaper[]
+  artifacts           Artifact[]
+}
+
+model PaperSection {
+  id          String            @id @default(cuid())
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  paperId     String
+  paper       Paper             @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  kind        PaperSectionKind  @default(custom)
+  title       String
+  contentMd   String            @default("")
+  order       Int               @default(0)
+
+  artifacts   Artifact[]
+}
+
+model HypothesisPaper {
+  hypothesisId String
+  hypothesis   Hypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+
+  paperId      String
+  paper        Paper      @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime   @default(now())
+
+  @@id([hypothesisId, paperId])
+}
+
+model Note {
+  id         String         @id @default(cuid())
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  kind       NoteKind       @default(paper)
+  title      String
+  authors    String?
+  url        String?
+  arxivId    String?
+  summaryMd  String?
+  takeaway   String?
+
+  projects   NoteProject[]
+}
+
+model NoteProject {
+  noteId     String
+  note       Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  projectId  String
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, projectId])
 }
 
 model Decision {

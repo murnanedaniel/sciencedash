@@ -19,6 +19,8 @@ import {
   createRun,
   deleteRun,
 } from "@/lib/server/projectActions";
+import { spawnPaperFromHypothesis } from "@/lib/server/paperActions";
+import { createCheckIn } from "@/lib/server/checkInActions";
 import {
   ProjectStatus,
   NarrativeReadiness,
@@ -294,6 +296,16 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
               Hypotheses {project.hypotheses.length} · Runs {totalRuns} · Metrics {project.metricDefinitions.length}
             </div>
             <div className="railItem">
+              <time>New check-in</time>
+              <form
+                action={createCheckIn.bind(null, { scope: "project" as const, scopeId: project.id })}
+                className="stackTight"
+              >
+                <textarea name="bodyMd" rows={3} placeholder="what happened today" />
+                <button type="submit" className="button">Log</button>
+              </form>
+            </div>
+            <div className="railItem">
               <time>Recent activity</time>
               {project.decisions.length === 0 ? (
                 <div className="muted">No decisions yet.</div>
@@ -341,6 +353,11 @@ async function ActivityTab({ projectId }: { projectId: string }) {
     include: { hypothesis: true },
     take: 200,
   });
+  const checkIns = await prisma.checkIn.findMany({
+    where: { projectId },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
   type Row = { at: Date; kind: string; title: string; sub?: string };
   const rows: Row[] = [
     ...decisions.map((d) => ({
@@ -354,6 +371,12 @@ async function ActivityTab({ projectId }: { projectId: string }) {
       kind: "run",
       title: `run: ${r.name}`,
       sub: `hypothesis: ${r.hypothesis.title}`,
+    })),
+    ...checkIns.map((c) => ({
+      at: c.createdAt,
+      kind: c.source === "ai" ? "ai-review" : "check-in",
+      title: c.bodyMd.slice(0, 240),
+      sub: c.source,
     })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
@@ -603,6 +626,12 @@ function RunsTab({
                   <button className="button" type="submit">Mark resolved</button>
                 </form>
               </details>
+
+              <form action={spawnPaperFromHypothesis.bind(null, h.id)}>
+                <button type="submit" className="button" style={{ width: "fit-content" }}>
+                  Spawn paper →
+                </button>
+              </form>
             </div>
           );
         })
