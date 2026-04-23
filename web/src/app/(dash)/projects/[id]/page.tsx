@@ -22,6 +22,7 @@ import {
 import { spawnPaperFromHypothesis } from "@/lib/server/paperActions";
 import { createCheckIn } from "@/lib/server/checkInActions";
 import { RunAiReviewButton } from "@/components/RunAiReviewButton";
+import { ParetoScatter } from "@/components/ParetoScatter";
 import {
   ProjectStatus,
   NarrativeReadiness,
@@ -424,8 +425,36 @@ function RunsTab({
   project: any;
   spentByHyp: Map<string, number>;
 }) {
+  // Build Pareto points
+  type Point = { id: string; label: string; metrics: Record<string, number> };
+  const points: Point[] = project.hypotheses.flatMap((h: AnyHyp) =>
+    h.runs.map((r: AnyDef) => ({
+      id: r.id,
+      label: `${h.title}/${r.name}`,
+      metrics: Object.fromEntries(
+        r.metrics.map((m: AnyDef) => {
+          const def = project.metricDefinitions.find(
+            (d: AnyDef) => d.id === m.definitionId,
+          );
+          return [def?.name ?? "unknown", m.value];
+        }),
+      ),
+    })),
+  );
+  const metricsForPareto = project.metricDefinitions.map((d: AnyDef) => ({
+    name: d.name,
+    unit: d.unit,
+    direction: d.direction,
+  }));
+
   return (
     <div className="stack">
+      {points.length >= 2 && metricsForPareto.length >= 2 ? (
+        <div className="card">
+          <h2 className="sectionTitle">Pareto scatter</h2>
+          <ParetoScatter points={points} metrics={metricsForPareto} />
+        </div>
+      ) : null}
       <div className="card">
         <h2 className="sectionTitle">Metric definitions</h2>
         {project.metricDefinitions.length === 0 ? (

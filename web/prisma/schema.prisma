@@ -131,6 +131,27 @@ enum PromptKind {
   outer_loop_audit
 }
 
+enum IngredientCategory {
+  globalism
+  sparsity
+  multiscale
+  multitask
+  tokenization
+  curriculum
+  pretraining
+  finetuning
+  gen_vs_masked
+  fusion
+  attention
+}
+
+enum IngredientResult {
+  pending
+  supported
+  refuted
+  mixed
+}
+
 model Project {
   id                  String        @id @default(cuid())
   createdAt           DateTime      @default(now())
@@ -194,6 +215,7 @@ model Hypothesis {
 
   runs                    Run[]
   papers                  HypothesisPaper[]
+  ingredients             HypothesisIngredient[]
 }
 
 model Run {
@@ -368,6 +390,34 @@ model PromptTemplate {
   kind       PromptKind  @unique
   version    Int         @default(1)
   bodyMd     String
+}
+
+model Ingredient {
+  id           String                 @id @default(cuid())
+  createdAt    DateTime               @default(now())
+
+  category     IngredientCategory
+  name         String
+  description  String?
+
+  hypotheses   HypothesisIngredient[]
+
+  @@unique([category, name])
+}
+
+model HypothesisIngredient {
+  hypothesisId String
+  hypothesis   Hypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  variant      String?
+  result       IngredientResult @default(pending)
+
+  createdAt    DateTime  @default(now())
+
+  @@id([hypothesisId, ingredientId])
 }
 
 model Decision {
