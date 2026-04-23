@@ -395,3 +395,552 @@ textarea:focus {
     transform: translateY(0);
   }
 }
+
+/* ----- Dashboard shell ----- */
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: calc(100vh - 72px);
+}
+
+@media (max-width: 880px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: sticky;
+    top: 72px;
+    z-index: 10;
+  }
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding: 28px 14px;
+  background: color-mix(in oklab, var(--paper) 40%, transparent);
+}
+
+.navStack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.navLink:hover {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--paper) 86%, transparent);
+}
+
+.navLink.navLinkActive {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--paper) 92%, transparent);
+}
+
+.navHotkey {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--faint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.navDivider {
+  height: 1px;
+  background: var(--border);
+  margin: 10px 8px;
+}
+
+.main {
+  min-width: 0;
+}
+
+/* ----- Tabs ----- */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+  letter-spacing: 0.02em;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tabActive {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+/* ----- Metric table (tabular nums) ----- */
+.metricTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.metricTable th,
+.metricTable td {
+  padding: 9px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.metricTable th {
+  color: var(--faint);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.metricTable td.num {
+  text-align: right;
+}
+
+.metricTable tr:hover {
+  background: color-mix(in oklab, var(--paper) 92%, transparent);
+}
+
+/* ----- Budget meter ----- */
+.meter {
+  width: 100%;
+  height: 6px;
+  background: color-mix(in oklab, var(--paper) 82%, transparent);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--accent) 80%, transparent),
+    color-mix(in oklab, var(--accent2) 80%, transparent)
+  );
+  border-radius: 999px;
+  transition: width 280ms ease;
+}
+
+.meterFill.over {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--accent2) 70%, transparent),
+    color-mix(in oklab, var(--danger) 70%, transparent)
+  );
+}
+
+/* ----- Hypothesis card ----- */
+.hypCard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  background: color-mix(in oklab, var(--paper) 86%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hypHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hypTitle {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+/* ----- Inline editing ----- */
+.inline {
+  display: block;
+  position: relative;
+}
+
+.inlineInput,
+.inlineTextarea {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: -8px -10px;
+  font: inherit;
+  color: inherit;
+  resize: vertical;
+  min-height: 36px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.inlineInput:hover,
+.inlineTextarea:hover {
+  background: color-mix(in oklab, var(--paper) 92%, transparent);
+}
+
+.inlineInput:focus,
+.inlineTextarea:focus {
+  background: color-mix(in oklab, var(--paper) 92%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border2) 45%);
+  outline: none;
+}
+
+.inlineStatus {
+  position: absolute;
+  right: -10px;
+  top: -6px;
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.inlineStatus.show {
+  opacity: 1;
+}
+
+/* ----- Page-wide layout tweaks ----- */
+.pageHead {
+  margin-bottom: 22px;
+}
+
+.pageTitle {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+
+.pageSub {
+  color: var(--muted);
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.twoCol {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 20px;
+}
+
+@media (max-width: 980px) {
+  .twoCol {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.railItem {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--paper) 88%, transparent);
+}
+
+.railItem time {
+  display: block;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+/* ----- Gate / alerts ----- */
+.alert {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--accent2) 35%, var(--border) 65%);
+  background: color-mix(in oklab, var(--accent2) 8%, transparent);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.alert h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.alert ul {
+  margin: 8px 0 0 18px;
+}
+
+/* ----- Kanban ----- */
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.kanbanCol {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  background: color-mix(in oklab, var(--paper) 90%, transparent);
+  min-height: 120px;
+}
+
+.kanbanHead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kanbanCard {
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--paper) 80%, transparent);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  margin-bottom: 8px;
+  transition: transform 120ms ease, border-color 120ms ease;
+  display: block;
+}
+
+.kanbanCard:hover {
+  transform: translateY(-1px);
+  border-color: var(--border2);
+}
+
+/* ----- Matrix (ingredients) ----- */
+.matrix {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.matrix th,
+.matrix td {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  text-align: center;
+  vertical-align: middle;
+}
+
+.matrix th {
+  font-weight: 600;
+  color: var(--muted);
+  background: color-mix(in oklab, var(--paper) 92%, transparent);
+}
+
+.matrix td.rowLabel {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.cellEmpty {
+  color: var(--faint);
+}
+
+.cellEmpty:hover {
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  cursor: pointer;
+}
+
+.cellPending {
+  background: color-mix(in oklab, var(--accent2) 12%, transparent);
+}
+
+.cellSupported {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cellRefuted {
+  background: color-mix(in oklab, var(--danger) 16%, transparent);
+  color: var(--ink);
+}
+
+.cellMixed {
+  background: color-mix(in oklab, var(--accent2) 20%, transparent);
+  color: var(--ink);
+}
+
+/* ----- Heatmap ----- */
+.heatmap {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.heatmap .cell {
+  border-radius: 10px;
+  padding: 14px 12px;
+  text-align: center;
+  background: color-mix(in oklab, var(--paper) 90%, transparent);
+  border: 1px solid var(--border);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.heatmap .cell strong {
+  display: block;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.heatmap .cell span {
+  font-size: 10px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ----- Activity stream ----- */
+.activity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activityRow {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--paper) 90%, transparent);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.activityRow time {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+  min-width: 96px;
+}
+
+.activityRow strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ----- Pareto ----- */
+.pareto {
+  background: color-mix(in oklab, var(--paper) 90%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.pareto .axisLabel {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  fill: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ----- Markdown preview ----- */
+.prose {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  line-height: 1.65;
+  font-size: 17px;
+  color: var(--ink);
+  max-width: 68ch;
+}
+
+.prose p { margin-bottom: 1em; }
+.prose h2 { font-size: 22px; margin: 1.2em 0 0.5em; letter-spacing: -0.01em; }
+.prose h3 { font-size: 18px; margin: 1em 0 0.4em; }
+.prose code { font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 0.9em; }
+
+/* ----- Cmd-K palette ----- */
+.palette {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklab, var(--bg0) 70%, transparent);
+  backdrop-filter: blur(6px);
+  display: flex;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 100;
+}
+
+.paletteBox {
+  width: min(560px, 92vw);
+  background: color-mix(in oklab, var(--paper) 96%, transparent);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 30px 100px color-mix(in oklab, var(--shadow) 80%, transparent);
+  overflow: hidden;
+}
+
+.paletteInput {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 16px 18px;
+  font-size: 16px;
+  background: transparent;
+}
+
+.paletteList {
+  max-height: 56vh;
+  overflow-y: auto;
+}
+
+.paletteItem {
+  padding: 12px 18px;
+  font-size: 14px;
+  display: flex;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.paletteItem.active,
+.paletteItem:hover {
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+
+.paletteItem .kbd {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--faint);
+}

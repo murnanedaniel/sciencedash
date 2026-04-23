@@ -26,6 +26,64 @@ enum ProjectStatus {
   parked
 }
 
+enum NarrativeReadiness {
+  none
+  figures_exist
+  skeleton
+  draftable
+  drafted
+  internal_review
+  ready_to_submit
+}
+
+enum HypothesisStatus {
+  active
+  paused
+  resolved
+}
+
+enum HypothesisVerdict {
+  pending
+  supported
+  refuted
+  abandoned
+  spawned_paper
+}
+
+enum RunStatus {
+  queued
+  running
+  done
+  failed
+}
+
+enum MetricDirection {
+  higher
+  lower
+}
+
+enum ArtifactKind {
+  figure
+  checkpoint
+  table
+  slide
+  dataset
+  other
+}
+
+enum DecisionKind {
+  promote
+  park
+  narrow
+  spawn_paper
+  resolve
+  retire
+  budget_escalate
+  paper_status_change
+  ai_patch_applied
+  other
+}
+
 model Project {
   id                  String        @id @default(cuid())
   createdAt           DateTime      @default(now())
@@ -35,16 +93,29 @@ model Project {
   type                ProjectType
   status              ProjectStatus @default(idea)
 
+  description         String?
   hypothesis          String?
   figuresOfMerit      String?
   timeline            String?
   nextSteps           String?
 
   githubRepoUrl       String?
-  narrativeReadiness  String?
+  narrativeReadiness  NarrativeReadiness @default(none)
+  narrativeReadinessNote String?
   blockers            String?
 
+  aiAutoReviewEnabled Boolean       @default(false)
+
+  wandbEntity         String?
+  wandbProject        String?
+
   tags                Tag[]         @relation("ProjectTags")
+
+  hypotheses          Hypothesis[]
+  metricDefinitions   ProjectMetricDefinition[]
+  checkIns            CheckIn[]
+  artifacts           Artifact[]
+  decisions           Decision[]
 }
 
 model Tag {
@@ -53,4 +124,118 @@ model Tag {
   name      String    @unique
 
   projects  Project[] @relation("ProjectTags")
+}
+
+model Hypothesis {
+  id                      String            @id @default(cuid())
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  projectId               String
+  project                 Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title                   String
+  statement               String?
+  status                  HypothesisStatus  @default(active)
+  verdict                 HypothesisVerdict @default(pending)
+
+  computeBudgetGpuHours   Float             @default(10)
+
+  resolvedAt              DateTime?
+
+  runs                    Run[]
+}
+
+model Run {
+  id               String    @id @default(cuid())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  hypothesisId     String
+  hypothesis       Hypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+
+  name             String
+  wandbRunId       String?
+  status           RunStatus @default(done)
+  startedAt        DateTime?
+  endedAt          DateTime?
+  computeGpuHours  Float     @default(0)
+  notes            String?
+
+  metrics          Metric[]
+  artifacts        Artifact[]
+}
+
+model ProjectMetricDefinition {
+  id          String          @id @default(cuid())
+  createdAt   DateTime        @default(now())
+
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name        String
+  unit        String?
+  direction   MetricDirection @default(higher)
+  isPrimary   Boolean         @default(false)
+  threshold   Float?
+
+  metrics     Metric[]
+
+  @@unique([projectId, name])
+}
+
+model Metric {
+  id           String                   @id @default(cuid())
+  createdAt    DateTime                 @default(now())
+
+  runId        String
+  run          Run                      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  definitionId String
+  definition   ProjectMetricDefinition  @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  value        Float
+
+  @@unique([runId, definitionId])
+}
+
+model Artifact {
+  id          String        @id @default(cuid())
+  createdAt   DateTime      @default(now())
+
+  kind        ArtifactKind  @default(other)
+  path        String
+  caption     String?
+
+  projectId   String?
+  project     Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  runId       String?
+  run         Run?          @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model Decision {
+  id           String         @id @default(cuid())
+  at           DateTime       @default(now())
+
+  kind         DecisionKind
+  subjectType  String
+  subjectId    String
+  rationale    String?
+
+  projectId    String?
+  project      Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model CheckIn {
+  id                  String    @id @default(cuid())
+  createdAt           DateTime  @default(now())
+
+  scope               String
+  projectId           String?
+  project             Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  bodyMd              String
+  source              String    @default("manual")
+  proposedPatchJson   String?
 }

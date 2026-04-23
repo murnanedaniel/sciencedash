@@ -45,3 +45,9 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# ScienceDash local runtime
+.data/
+/src/generated/
+dev.db
+dev.db-journal
