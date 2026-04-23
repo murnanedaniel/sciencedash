@@ -24,9 +24,11 @@ export default async function ProjectDetailPage({ params }: Props) {
     <div className="container">
       <header className="header">
         <div className="stackTight">
-          <h1>{project.title}</h1>
+          <h1 style={{ fontFamily: "var(--font-display)" }}>{project.title}</h1>
           <div className="rowWrap">
-            <span className="pill">{project.type}</span>
+            <span className="pill">
+              <span style={{ color: "var(--accent)" }}>{project.type}</span>
+            </span>
             <span className="pill pillMuted">{project.status}</span>
             <span className="muted small">
               Updated {project.updatedAt.toLocaleString()}

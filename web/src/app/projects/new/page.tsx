@@ -48,7 +48,7 @@ export default function NewProjectPage() {
     <div className="container">
       <header className="header">
         <div>
-          <h1>New project</h1>
+          <h1 style={{ fontFamily: "var(--font-display)" }}>New project</h1>
           <p className="muted">
             Keep it paper-sized: one question, one answer, one output.
           </p>
@@ -62,7 +62,12 @@ export default function NewProjectPage() {
         <form className="stack" action={createProject}>
           <div className="field">
             <label htmlFor="title">Title</label>
-            <input id="title" name="title" placeholder="e.g. Robust tracking under misalignment" required />
+            <input
+              id="title"
+              name="title"
+              placeholder="e.g. Robust tracking under misalignment"
+              required
+            />
           </div>
 
           <div className="row">

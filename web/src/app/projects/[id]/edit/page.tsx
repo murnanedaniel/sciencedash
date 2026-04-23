@@ -59,7 +59,7 @@ export default async function EditProjectPage({ params }: Props) {
     <div className="container">
       <header className="header">
         <div>
-          <h1>Edit project</h1>
+          <h1 style={{ fontFamily: "var(--font-display)" }}>Edit project</h1>
           <p className="muted">{project.title}</p>
         </div>
         <div className="row">

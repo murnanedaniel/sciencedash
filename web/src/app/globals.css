@@ -1,12 +1,36 @@
+/* ScienceDash aesthetic: editorial lab notebook + instrument panel */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg0: #07080b;
+  --bg1: #0b0d12;
+  --paper: #0f121a;
+  --ink: #eef0ff;
+  --muted: rgba(238, 240, 255, 0.72);
+  --faint: rgba(238, 240, 255, 0.55);
+
+  --border: rgba(238, 240, 255, 0.12);
+  --border2: rgba(238, 240, 255, 0.18);
+  --shadow: rgba(0, 0, 0, 0.45);
+
+  --accent: #a7ffea;
+  --accent2: #ffcf6e;
+  --danger: #ff5b7a;
+
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 12px;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg0: #f6f6fb;
+    --bg1: #ffffff;
+    --paper: #ffffff;
+    --ink: #0c1020;
+    --muted: rgba(12, 16, 32, 0.72);
+    --faint: rgba(12, 16, 32, 0.55);
+    --border: rgba(12, 16, 32, 0.12);
+    --border2: rgba(12, 16, 32, 0.18);
+    --shadow: rgba(12, 16, 32, 0.14);
   }
 }
 
@@ -24,9 +48,13 @@ body {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--ink);
+  background: radial-gradient(1200px 700px at 12% 10%, rgba(167, 255, 234, 0.08), transparent 60%),
+    radial-gradient(1000px 650px at 80% 14%, rgba(255, 207, 110, 0.07), transparent 55%),
+    radial-gradient(900px 650px at 65% 75%, rgba(119, 151, 255, 0.08), transparent 55%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+  font-family: var(--font-ui-sans), ui-sans-serif, system-ui, -apple-system,
+    Segoe UI, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -42,11 +70,83 @@ a {
   text-decoration: none;
 }
 
+.appBg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(closest-side, rgba(0, 0, 0, 0.9), transparent 85%);
+  opacity: 0.55;
+}
+
+.appShell {
+  position: relative;
+  min-height: 100vh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--paper) 62%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.brand {
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brandMark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: color-mix(in oklab, var(--ink) 80%, var(--accent) 20%);
+  background:
+    radial-gradient(14px 18px at 30% 30%, rgba(167, 255, 234, 0.5), transparent 65%),
+    radial-gradient(20px 18px at 70% 75%, rgba(255, 207, 110, 0.32), transparent 60%),
+    color-mix(in oklab, var(--paper) 88%, var(--ink) 12%);
+  border: 1px solid var(--border2);
+  box-shadow: 0 10px 30px var(--shadow);
+  user-select: none;
+}
+
+.brandText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.brandName {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.brandTag {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .container {
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 32px 20px 56px;
+  padding: 28px 20px 72px;
 }
 
 .header {
@@ -54,7 +154,7 @@ a {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .stack {
@@ -84,24 +184,51 @@ a {
 
 .grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
 }
 
 .card {
-  border: 1px solid color-mix(in oklab, var(--foreground) 15%, transparent);
-  background: color-mix(in oklab, var(--background) 92%, var(--foreground) 8%);
-  border-radius: 12px;
-  padding: 14px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(900px 450px at 8% 0%, rgba(167, 255, 234, 0.045), transparent 60%),
+    radial-gradient(700px 420px at 92% 10%, rgba(255, 207, 110, 0.035), transparent 60%),
+    color-mix(in oklab, var(--paper) 88%, transparent);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: 0 18px 60px color-mix(in oklab, var(--shadow) 68%, transparent);
 }
 
 .cardLink {
-  transition: transform 120ms ease, border-color 120ms ease;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .cardLink:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in oklab, var(--foreground) 28%, transparent);
+  transform: translateY(-2px);
+  border-color: var(--border2);
+  box-shadow: 0 22px 80px color-mix(in oklab, var(--shadow) 80%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cardLink {
+    animation: cardIn 420ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+  }
+
+  .cardLink:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .cardLink:nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .cardLink:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .cardLink:nth-child(5) {
+    animation-delay: 160ms;
+  }
+  .cardLink:nth-child(6) {
+    animation-delay: 200ms;
+  }
 }
 
 .cardTitleRow {
@@ -109,23 +236,27 @@ a {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .cardTitle {
-  font-size: 18px;
-  font-weight: 650;
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .sectionTitle {
   font-size: 14px;
   font-weight: 650;
   margin-bottom: 8px;
-  opacity: 0.9;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .muted {
-  opacity: 0.75;
+  color: var(--muted);
 }
 
 .small {
@@ -139,14 +270,16 @@ a {
   display: -webkit-box;
   -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
+  line-height: 1.45;
 }
 
 .pill {
   font-size: 12px;
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklab, var(--foreground) 18%, transparent);
-  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--paper) 86%, transparent);
+  color: var(--muted);
 }
 
 .pillMuted {
@@ -157,30 +290,38 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 9px 12px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in oklab, var(--foreground) 22%, transparent);
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
-  font-weight: 650;
+  padding: 10px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--border2);
+  background:
+    radial-gradient(16px 18px at 25% 35%, rgba(167, 255, 234, 0.28), transparent 65%),
+    radial-gradient(20px 18px at 80% 75%, rgba(255, 207, 110, 0.18), transparent 60%),
+    color-mix(in oklab, var(--paper) 82%, transparent);
+  font-weight: 700;
+  letter-spacing: 0.01em;
   cursor: pointer;
   user-select: none;
+  transition: transform 140ms ease, border-color 140ms ease, filter 140ms ease;
 }
 
 .button:hover {
-  border-color: color-mix(in oklab, var(--foreground) 35%, transparent);
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--border2) 60%);
+  filter: brightness(1.02);
 }
 
 .buttonSecondary {
   background: transparent;
+  border-color: var(--border);
 }
 
 .buttonDanger {
-  background: color-mix(in oklab, red 18%, transparent);
-  border-color: color-mix(in oklab, red 40%, transparent);
+  background: color-mix(in oklab, var(--danger) 18%, transparent);
+  border-color: color-mix(in oklab, var(--danger) 45%, var(--border2) 55%);
 }
 
 .danger {
-  border-color: color-mix(in oklab, red 30%, transparent);
+  border-color: color-mix(in oklab, var(--danger) 30%, transparent);
 }
 
 .field {
@@ -192,23 +333,38 @@ a {
 label {
   font-size: 13px;
   font-weight: 650;
-  opacity: 0.9;
+  color: var(--muted);
+  letter-spacing: 0.01em;
 }
 
 input,
 select,
 textarea {
   width: 100%;
-  border-radius: 10px;
-  border: 1px solid color-mix(in oklab, var(--foreground) 18%, transparent);
-  padding: 10px 11px;
-  background: color-mix(in oklab, var(--background) 90%, var(--foreground) 10%);
-  color: var(--foreground);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  padding: 11px 12px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--paper) 88%, transparent),
+      color-mix(in oklab, var(--paper) 78%, transparent)
+    );
+  color: var(--ink);
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 textarea {
   resize: vertical;
   min-height: 42px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--border2) 45%);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 18%, transparent);
 }
 
 .link {
@@ -219,5 +375,23 @@ textarea {
 @media (prefers-color-scheme: dark) {
   html {
     color-scheme: dark;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cardLink,
+  .button {
+    transition: none;
+  }
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
