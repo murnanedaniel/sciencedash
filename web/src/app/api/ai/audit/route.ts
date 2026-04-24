@@ -46,26 +46,28 @@ export async function POST() {
   );
 
   const result = await runAi("ai_audit", null, async () =>
-    callClaudeJson<AuditOutput>("outer-loop-audit", payload, { cacheSystem: true }),
+    callClaudeJson<AuditOutput>("outer-loop-audit", payload),
   );
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
 
+  const out = result.out.parsed;
   await prisma.checkIn.create({
     data: {
       scope: "portfolio",
       source: "ai",
-      bodyMd: result.out.rationale,
+      bodyMd: out.rationale,
       proposedPatchJson: JSON.stringify({
-        diagnosis: result.out.diagnosis,
+        diagnosis: out.diagnosis,
         recommendation: "audit",
-        rationale: result.out.rationale,
-        proposedPatches: result.out.actions.map((a) => ({
+        rationale: out.rationale,
+        proposedPatches: out.actions.map((a) => ({
           path: `audit.${a.kind}`,
           value: `${a.projectTitle}: ${a.rationale}`,
         })),
+        costUsd: result.out.costUsd,
       }),
     },
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, costUsd: result.out.costUsd });
 }

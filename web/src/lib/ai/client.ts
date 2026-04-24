@@ -1,6 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { prisma } from "@/lib/prisma";
 import type { JobKind } from "@/generated/prisma/client";
 
@@ -12,26 +13,26 @@ export type PromptName =
   | "polish"
   | "outer-loop-audit";
 
+const KIND_MAP: Record<PromptName, string> = {
+  "critical-review": "critical_review",
+  skeleton: "paper_skeleton",
+  polish: "section_polish",
+  "outer-loop-audit": "outer_loop_audit",
+};
+
+const FILE_MAP: Record<PromptName, string> = {
+  "critical-review": "critical-review.md",
+  skeleton: "skeleton.md",
+  polish: "polish.md",
+  "outer-loop-audit": "outer-loop-audit.md",
+};
+
 async function loadPrompt(name: PromptName): Promise<string> {
-  // Prompt templates in the DB override the on-disk default.
-  const kindMap: Record<PromptName, string> = {
-    "critical-review": "critical_review",
-    skeleton: "paper_skeleton",
-    polish: "section_polish",
-    "outer-loop-audit": "outer_loop_audit",
-  };
   const row = await prisma.promptTemplate.findUnique({
-    where: { kind: kindMap[name] as never },
+    where: { kind: KIND_MAP[name] as never },
   });
   if (row) return row.bodyMd;
-  const p = await readFile(join(PROMPT_DIR, `${name}.md`), "utf8");
-  return p;
-}
-
-function anthropic(): Anthropic {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("ANTHROPIC_API_KEY not set");
-  return new Anthropic({ apiKey: key });
+  return readFile(join(PROMPT_DIR, FILE_MAP[name]), "utf8");
 }
 
 /** Wrap every AI call in a JobRun row so spend is visible on /settings. */
@@ -39,7 +40,10 @@ export async function runAi<T>(
   kind: JobKind,
   projectId: string | null,
   fn: () => Promise<T>,
-): Promise<{ ok: true; out: T; jobId: string } | { ok: false; error: string; jobId: string }> {
+): Promise<
+  | { ok: true; out: T; jobId: string }
+  | { ok: false; error: string; jobId: string }
+> {
   const job = await prisma.jobRun.create({
     data: { kind, projectId: projectId ?? null, startedAt: new Date() },
   });
@@ -60,34 +64,179 @@ export async function runAi<T>(
   }
 }
 
+/**
+ * Run one Claude call via the Claude Agent SDK. Authenticates through the
+ * user's installed `claude` binary, so the call bills against their Pro/Max
+ * subscription (not API credits).
+ *
+ * We disable all tools (`tools: []`), run in `os.tmpdir()` so the dashboard's
+ * own CLAUDE.md / AGENTS.md / source files don't leak into the context, and
+ * cap at one turn — every prompt in this repo is a single-shot JSON return.
+ */
 export async function callClaudeJson<T>(
   promptName: PromptName,
   userContent: string,
-  opts: { cacheSystem?: boolean } = {},
-): Promise<T> {
-  const client = anthropic();
-  const system = await loadPrompt(promptName);
-  const resp = await client.messages.create({
-    model: "claude-opus-4-7",
-    max_tokens: 16000,
-    system: opts.cacheSystem
-      ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }]
-      : system,
-    thinking: { type: "adaptive" },
-    messages: [{ role: "user", content: userContent }],
+): Promise<{ parsed: T; rawText: string; costUsd: number | null }> {
+  const systemPrompt = await loadPrompt(promptName);
+
+  const q = query({
+    prompt: userContent,
+    options: {
+      systemPrompt,
+      model: "claude-opus-4-7",
+      cwd: tmpdir(),
+      tools: [],
+      maxTurns: 1,
+      settingSources: [],
+      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "sciencedash/0.1" },
+    },
   });
 
-  const textBlock = resp.content.find(
-    (b): b is Anthropic.TextBlock => b.type === "text",
-  );
-  if (!textBlock) throw new Error("no text block in response");
+  let resultText: string | null = null;
+  let costUsd: number | null = null;
+  let errorText: string | null = null;
 
-  // Be forgiving of stray code fences even though the prompt forbids them.
-  const stripped = textBlock.text
+  for await (const msg of q) {
+    if (msg.type === "result") {
+      if (msg.subtype === "success") {
+        resultText = msg.result;
+        costUsd = msg.total_cost_usd;
+      } else {
+        errorText = `Claude Agent SDK: ${msg.subtype} (${(msg.errors ?? []).join("; ") || "no details"})`;
+      }
+      break;
+    }
+  }
+
+  if (errorText) throw new Error(errorText);
+  if (resultText == null)
+    throw new Error("Claude Agent SDK returned no result message");
+
+  const parsed = extractJson<T>(resultText);
+  return { parsed, rawText: resultText, costUsd };
+}
+
+/**
+ * Extract the first balanced JSON object from model output. Models occasionally
+ * add a markdown fence, leading prose, or a trailing explanation — we strip
+ * both and walk the brace stack to pull just the object. As a last resort we
+ * re-escape raw control characters inside quoted strings.
+ */
+function extractJson<T>(raw: string): T {
+  const cleaned = raw
     .trim()
     .replace(/^```json\s*/i, "")
     .replace(/^```\s*/i, "")
     .replace(/```$/i, "")
     .trim();
-  return JSON.parse(stripped) as T;
+
+  const start = cleaned.indexOf("{");
+  if (start === -1) {
+    throw new Error(
+      `model returned no JSON object — first 200 chars: ${cleaned.slice(0, 200)}`,
+    );
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let end = -1;
+  for (let i = start; i < cleaned.length; i++) {
+    const c = cleaned[i]!;
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === "\\") {
+      escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+
+  if (end === -1) {
+    throw new Error(
+      `unterminated JSON object — first 200 chars: ${cleaned.slice(start, start + 200)}`,
+    );
+  }
+
+  const slice = cleaned.slice(start, end + 1);
+  try {
+    return JSON.parse(slice) as T;
+  } catch (firstErr) {
+    const defanged = escapeControlCharsInStrings(slice);
+    try {
+      return JSON.parse(defanged) as T;
+    } catch {
+      throw new Error(
+        `model returned non-JSON output: ${(firstErr as Error).message} — first 200 chars: ${slice.slice(0, 200)}`,
+      );
+    }
+  }
+}
+
+function escapeControlCharsInStrings(s: string): string {
+  let out = "";
+  let inString = false;
+  let escape = false;
+  for (const c of s) {
+    if (escape) {
+      out += c;
+      escape = false;
+      continue;
+    }
+    if (c === "\\") {
+      out += c;
+      escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      out += c;
+      continue;
+    }
+    if (inString) {
+      const code = c.charCodeAt(0);
+      if (c === "\n") out += "\\n";
+      else if (c === "\r") out += "\\r";
+      else if (c === "\t") out += "\\t";
+      else if (code < 0x20)
+        out += `\\u${code.toString(16).padStart(4, "0")}`;
+      else out += c;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+/** Probe the installed Claude Code binary for Settings display. */
+export async function detectClaudeCode(): Promise<{
+  ok: boolean;
+  version?: string;
+  error?: string;
+}> {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolve) => {
+    const proc = spawn("claude", ["--version"], { timeout: 4000 });
+    let out = "";
+    proc.stdout.on("data", (d) => (out += d));
+    proc.on("error", (e) => resolve({ ok: false, error: e.message }));
+    proc.on("close", (code) => {
+      if (code === 0) resolve({ ok: true, version: out.trim() });
+      else resolve({ ok: false, error: `exit ${code}` });
+    });
+  });
 }

@@ -82,12 +82,12 @@ export async function POST(req: NextRequest) {
   );
 
   const result = await runAi("ai_review", projectId, async () =>
-    callClaudeJson<ReviewOutput>("critical-review", payload, { cacheSystem: true }),
+    callClaudeJson<ReviewOutput>("critical-review", payload),
   );
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
 
-  const out = result.out;
+  const out = result.out.parsed;
   await prisma.checkIn.create({
     data: {
       scope: "project",
@@ -99,9 +99,14 @@ export async function POST(req: NextRequest) {
         recommendation: out.recommendation,
         rationale: out.rationale,
         proposedPatches: out.proposedPatches,
+        costUsd: result.out.costUsd,
       }),
     },
   });
 
-  return NextResponse.json({ ok: true, recommendation: out.recommendation });
+  return NextResponse.json({
+    ok: true,
+    recommendation: out.recommendation,
+    costUsd: result.out.costUsd,
+  });
 }

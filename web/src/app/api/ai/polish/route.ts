@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
   await prisma.paperSection.update({
     where: { id: sectionId },
-    data: { contentMd: result.out.contentMd },
+    data: { contentMd: result.out.parsed.contentMd },
   });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, costUsd: result.out.costUsd });
 }

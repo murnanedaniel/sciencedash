@@ -59,10 +59,10 @@ export async function POST(req: NextRequest) {
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
 
   const wants: Array<[string, string]> = [
-    ["intro", result.out.intro],
-    ["method", result.out.method],
-    ["experiments", result.out.experiments],
-    ["results", result.out.results],
+    ["intro", result.out.parsed.intro],
+    ["method", result.out.parsed.method],
+    ["experiments", result.out.parsed.experiments],
+    ["results", result.out.parsed.results],
   ];
   for (const [kind, content] of wants) {
     const s = paper.sections.find((x) => x.kind === kind);
@@ -73,5 +73,5 @@ export async function POST(req: NextRequest) {
       });
     }
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, costUsd: result.out.costUsd });
 }

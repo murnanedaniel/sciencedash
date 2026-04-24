@@ -8,6 +8,7 @@ import {
   loadDefaultPrompt,
 } from "@/lib/server/settingsActions";
 import { toggleAiAutoReview } from "@/lib/server/projectActions";
+import { detectClaudeCode } from "@/lib/ai/client";
 import { PromptKind } from "@/generated/prisma/client";
 
 const PROMPT_LABELS: Record<PromptKind, string> = {
@@ -28,8 +29,8 @@ export default async function SettingsPage() {
   }
   const heartbeat = jobs.find((j) => j.kind === "other" && j.ok === true);
 
+  const claudeCode = await detectClaudeCode();
   const keys = {
-    ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
     WANDB_API_KEY: !!process.env.WANDB_API_KEY,
     GITHUB_PAT: !!process.env.GITHUB_PAT,
   };
@@ -57,21 +58,52 @@ export default async function SettingsPage() {
       </header>
 
       <div className="stack">
-        {/* API keys */}
+        {/* Integrations */}
         <div className="card">
-          <h2 className="sectionTitle">API keys (read from .env.local)</h2>
+          <h2 className="sectionTitle">Integrations</h2>
           <ul className="stack" style={{ listStyle: "none" }}>
+            <li className="row" style={{ justifyContent: "space-between" }}>
+              <div>
+                <code style={{ fontFamily: "var(--font-geist-mono)" }}>
+                  Claude Code
+                </code>
+                <div className="muted small" style={{ marginTop: 2 }}>
+                  AI features bill against your Pro / Max subscription, not API credits.
+                  Requires <code>claude</code> on PATH and logged in (<code>claude login</code>).
+                </div>
+              </div>
+              <span
+                className="pill"
+                style={{
+                  color: claudeCode.ok ? "var(--accent)" : "var(--faint)",
+                  whiteSpace: "nowrap",
+                }}
+                title={claudeCode.error}
+              >
+                {claudeCode.ok
+                  ? claudeCode.version ?? "detected"
+                  : "missing"}
+              </span>
+            </li>
             {Object.entries(keys).map(([k, ok]) => (
-              <li key={k} className="row" style={{ justifyContent: "space-between" }}>
+              <li
+                key={k}
+                className="row"
+                style={{ justifyContent: "space-between" }}
+              >
                 <code style={{ fontFamily: "var(--font-geist-mono)" }}>{k}</code>
-                <span className="pill" style={{ color: ok ? "var(--accent)" : "var(--faint)" }}>
+                <span
+                  className="pill"
+                  style={{ color: ok ? "var(--accent)" : "var(--faint)" }}
+                >
                   {ok ? "configured" : "missing"}
                 </span>
               </li>
             ))}
           </ul>
           <p className="muted small" style={{ marginTop: 8 }}>
-            Restart the server after editing <code>.env.local</code>.
+            Restart the server after editing <code>.env.local</code>. Claude Code auth
+            is stored in <code>~/.claude/</code> — no env var needed.
           </p>
         </div>
 
