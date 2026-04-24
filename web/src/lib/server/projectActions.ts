@@ -21,11 +21,8 @@ const SIMPLE_TEXT_FIELDS = new Set([
   "figuresOfMerit",
   "timeline",
   "nextSteps",
-  "githubRepoUrl",
   "blockers",
   "narrativeReadinessNote",
-  "wandbEntity",
-  "wandbProject",
 ]);
 
 export async function patchProjectField(
@@ -37,10 +34,17 @@ export async function patchProjectField(
     return { ok: false, error: `unknown field: ${field}` };
   }
   const v = value.trim();
-  await prisma.project.update({
-    where: { id },
-    data: { [field]: v.length ? v : null },
-  });
+  // Title is non-nullable: refuse empty writes so the project can't lose
+  // its name by accident. Every other simple field is nullable.
+  if (field === "title") {
+    if (!v) return { ok: false, error: "title cannot be empty" };
+    await prisma.project.update({ where: { id }, data: { title: v } });
+  } else {
+    await prisma.project.update({
+      where: { id },
+      data: { [field]: v.length ? v : null },
+    });
+  }
   revalidatePath(`/projects/${id}`);
   return { ok: true };
 }
@@ -80,7 +84,22 @@ export async function updateProjectTags(projectId: string, formData: FormData) {
   revalidatePath(`/projects/${projectId}`);
 }
 
-export async function setProjectStatus(projectId: string, formData: FormData) {
+export type StatusActionState =
+  | { ok: true; rationale: string }
+  | { ok: false; missing: string[]; rationale: string; attempted: ProjectStatus };
+
+/**
+ * setProjectStatus returns state so the client can render gate failures
+ * without a full-page reload (which would clobber anything the user had
+ * typed into other inputs on the page). Bound against projectId by the
+ * client form: `setProjectStatus.bind(null, id)` then fed to
+ * `useActionState`.
+ */
+export async function setProjectStatus(
+  projectId: string,
+  _prev: StatusActionState | null | undefined,
+  formData: FormData,
+): Promise<StatusActionState> {
   const next = String(formData.get("status") ?? "") as ProjectStatus;
   const rationale = (String(formData.get("rationale") ?? "") || "").trim();
 
@@ -91,16 +110,19 @@ export async function setProjectStatus(projectId: string, formData: FormData) {
       metricDefinitions: { select: { id: true, isPrimary: true } },
     },
   });
-  if (!project) return;
+  if (!project) {
+    return { ok: false, missing: ["project not found"], rationale, attempted: next };
+  }
 
-  // Promotion gate: idea -> active must satisfy §16.1.
+  // Promotion gate: idea → active must satisfy §16.1.
   if (project.status === "idea" && next === "active") {
-    const gate = checkPromotion(project, project.hypotheses, project.metricDefinitions);
+    const gate = checkPromotion(
+      project,
+      project.hypotheses,
+      project.metricDefinitions,
+    );
     if (!gate.ok) {
-      // Stash missing-fields in URL so the page renders the alert.
-      redirect(
-        `/projects/${projectId}?gate=${encodeURIComponent(gate.missing.join("|"))}`,
-      );
+      return { ok: false, missing: gate.missing, rationale, attempted: next };
     }
   }
 
@@ -130,6 +152,7 @@ export async function setProjectStatus(projectId: string, formData: FormData) {
 
   revalidatePath(`/projects/${projectId}`);
   revalidatePath(`/projects`);
+  return { ok: true, rationale: "" };
 }
 
 export async function setProjectNarrativeReadiness(
@@ -261,6 +284,8 @@ export async function createRun(hypothesisId: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const wandbRunId = String(formData.get("wandbRunId") ?? "").trim() || null;
+  const wandbSourceId =
+    String(formData.get("wandbSourceId") ?? "").trim() || null;
   const computeGpuHours = Number(formData.get("computeGpuHours") ?? 0);
   const endedAtStr = String(formData.get("endedAt") ?? "").trim();
   if (!name) return;
@@ -271,6 +296,7 @@ export async function createRun(hypothesisId: string, formData: FormData) {
       name,
       notes,
       wandbRunId,
+      wandbSourceId,
       computeGpuHours: Number.isFinite(computeGpuHours) ? computeGpuHours : 0,
       status: "done",
       endedAt: endedAtStr ? new Date(endedAtStr) : new Date(),
@@ -304,4 +330,52 @@ export async function deleteRun(runId: string) {
     include: { hypothesis: { select: { projectId: true } } },
   });
   revalidatePath(`/projects/${r.hypothesis.projectId}`);
+}
+
+/* -------------------------------------------------------------------------
+   Multi-source links: WandbSource + RepoLink
+   ---------------------------------------------------------------------- */
+
+export async function addWandbSource(projectId: string, formData: FormData) {
+  const entity = String(formData.get("entity") ?? "").trim();
+  const name = String(formData.get("name") ?? "").trim();
+  if (!entity || !name) return;
+  try {
+    await prisma.wandbSource.create({
+      data: { projectId, entity, name },
+    });
+  } catch {
+    // @@unique collision — same entity/name pair already linked; silently no-op
+  }
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function removeWandbSource(id: string) {
+  const src = await prisma.wandbSource.delete({
+    where: { id },
+    select: { projectId: true },
+  });
+  revalidatePath(`/projects/${src.projectId}`);
+}
+
+export async function addRepoLink(projectId: string, formData: FormData) {
+  const url = String(formData.get("url") ?? "").trim();
+  const label = String(formData.get("label") ?? "").trim() || null;
+  if (!url) return;
+  try {
+    await prisma.repoLink.create({
+      data: { projectId, url, label },
+    });
+  } catch {
+    // @@unique collision — same url already linked; silently no-op
+  }
+  revalidatePath(`/projects/${projectId}`);
+}
+
+export async function removeRepoLink(id: string) {
+  const link = await prisma.repoLink.delete({
+    where: { id },
+    select: { projectId: true },
+  });
+  revalidatePath(`/projects/${link.projectId}`);
 }

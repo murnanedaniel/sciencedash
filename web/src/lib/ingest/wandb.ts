@@ -1,10 +1,9 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * Pull recent runs for every project with a configured W&B entity/project, and
- * upsert metric values on Run rows that already exist (matched by wandbRunId).
- * We don't create runs the user hasn't logged — this keeps the data model
- * honest and lets the user declare which runs are part of which hypothesis.
+ * Pull W&B summary metrics for every Run that has a wandbSourceId + wandbRunId
+ * set. The source carries the entity/name pair. We only update existing Run
+ * rows — runs the user hasn't logged stay absent, keeping the model honest.
  */
 export async function pullWandb(): Promise<{
   updated: number;
@@ -13,62 +12,63 @@ export async function pullWandb(): Promise<{
   const apiKey = process.env.WANDB_API_KEY;
   if (!apiKey) throw new Error("WANDB_API_KEY not set");
 
-  const projects = await prisma.project.findMany({
+  const runs = await prisma.run.findMany({
     where: {
-      NOT: [
-        { wandbEntity: null },
-        { wandbProject: null },
-      ],
+      wandbRunId: { not: null },
+      wandbSourceId: { not: null },
     },
     include: {
-      metricDefinitions: true,
-      hypotheses: { include: { runs: true } },
+      wandbSource: true,
+      hypothesis: {
+        include: {
+          project: {
+            include: { metricDefinitions: true },
+          },
+        },
+      },
     },
   });
 
   let updated = 0;
   let scanned = 0;
 
-  for (const p of projects) {
-    if (!p.wandbEntity || !p.wandbProject) continue;
-    const wandbIds = p.hypotheses
-      .flatMap((h) => h.runs)
-      .map((r) => r.wandbRunId)
-      .filter((x): x is string => !!x);
-    if (wandbIds.length === 0) continue;
+  for (const run of runs) {
+    if (!run.wandbSource || !run.wandbRunId) continue;
+    scanned++;
+    const data = await fetchRunSummary(
+      apiKey,
+      run.wandbSource.entity,
+      run.wandbSource.name,
+      run.wandbRunId,
+    ).catch(() => null);
+    if (!data) continue;
 
-    for (const runId of wandbIds) {
-      scanned++;
-      const data = await fetchRunSummary(apiKey, p.wandbEntity, p.wandbProject, runId).catch(() => null);
-      if (!data) continue;
+    await prisma.run.update({
+      where: { id: run.id },
+      data: {
+        status:
+          data.state === "finished"
+            ? "done"
+            : data.state === "failed"
+              ? "failed"
+              : run.status,
+        endedAt: data.endedAt ? new Date(data.endedAt) : run.endedAt,
+        computeGpuHours: data.gpuHours ?? run.computeGpuHours,
+      },
+    });
 
-      const run = await prisma.run.findFirst({
-        where: { wandbRunId: runId, hypothesis: { projectId: p.id } },
-      });
-      if (!run) continue;
-
-      // Update run metadata
-      await prisma.run.update({
-        where: { id: run.id },
-        data: {
-          status: data.state === "finished" ? "done" : data.state === "failed" ? "failed" : run.status,
-          endedAt: data.endedAt ? new Date(data.endedAt) : run.endedAt,
-          computeGpuHours: data.gpuHours ?? run.computeGpuHours,
+    for (const def of run.hypothesis.project.metricDefinitions) {
+      const v = data.summary[def.name];
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      await prisma.metric.upsert({
+        where: {
+          runId_definitionId: { runId: run.id, definitionId: def.id },
         },
+        create: { runId: run.id, definitionId: def.id, value: v },
+        update: { value: v },
       });
-
-      // Upsert metric values for any matching ProjectMetricDefinition
-      for (const def of p.metricDefinitions) {
-        const v = data.summary[def.name];
-        if (typeof v !== "number" || !Number.isFinite(v)) continue;
-        await prisma.metric.upsert({
-          where: { runId_definitionId: { runId: run.id, definitionId: def.id } },
-          create: { runId: run.id, definitionId: def.id, value: v },
-          update: { value: v },
-        });
-      }
-      updated++;
     }
+    updated++;
   }
   return { updated, scanned };
 }

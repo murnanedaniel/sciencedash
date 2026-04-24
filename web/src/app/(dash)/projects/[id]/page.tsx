@@ -18,12 +18,17 @@ import {
   deleteMetricDefinition,
   createRun,
   deleteRun,
+  addWandbSource,
+  removeWandbSource,
+  addRepoLink,
+  removeRepoLink,
 } from "@/lib/server/projectActions";
 import { spawnPaperFromHypothesis } from "@/lib/server/paperActions";
 import { createCheckIn } from "@/lib/server/checkInActions";
 import { RunAiReviewButton } from "@/components/RunAiReviewButton";
 import { ParetoScatter } from "@/components/ParetoScatter";
 import { TagChips } from "@/components/TagChips";
+import { StatusForm } from "@/components/StatusForm";
 import {
   ProjectStatus,
   NarrativeReadiness,
@@ -43,12 +48,13 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
   const { id } = await params;
   const sp = (await searchParams) ?? {};
   const tab = asString(sp.tab) || "overview";
-  const gate = asString(sp.gate);
 
   const project = await prisma.project.findUnique({
     where: { id },
     include: {
       tags: true,
+      wandbSources: { orderBy: { createdAt: "asc" } },
+      repoLinks: { orderBy: { createdAt: "asc" } },
       hypotheses: {
         orderBy: { createdAt: "desc" },
         include: {
@@ -87,8 +93,16 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
   return (
     <div className="container">
       <header className="header">
-        <div className="stackTight">
-          <h1 className="pageTitle">{project.title}</h1>
+        <div className="stackTight" style={{ flex: 1, minWidth: 0 }}>
+          <div className="pageTitle projectTitleInline">
+            <InlineField
+              value={project.title}
+              field="title"
+              idForAction={project.id}
+              action={patchProjectField}
+              placeholder="Project title"
+            />
+          </div>
           <div className="rowWrap">
             <span className="pill pillMuted">{project.status}</span>
             {project.tags && project.tags.length > 0 ? (
@@ -120,18 +134,6 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
         </div>
       </header>
 
-      {gate ? (
-        <div className="alert" style={{ marginBottom: 16 }}>
-          <h3>Can&apos;t promote to active yet</h3>
-          <div>§16.1 requires the following before a project is active:</div>
-          <ul>
-            {gate.split("|").map((m) => (
-              <li key={m}>{m}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
       <nav className="tabs">
         <Link
           href={`/projects/${project.id}?tab=overview`}
@@ -160,22 +162,12 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
         <div className="twoCol">
           <main className="stack">
             <div className="card">
-              <h2 className="sectionTitle">Type &amp; status</h2>
-              <form action={setProjectStatus.bind(null, project.id)} className="row" style={{ flexWrap: "wrap", gap: 10 }}>
-                <div className="field">
-                  <label htmlFor="status">Status</label>
-                  <select id="status" name="status" defaultValue={project.status}>
-                    {Object.values(ProjectStatus).map((v) => (
-                      <option key={v} value={v}>{v}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field" style={{ flex: "1 1 240px" }}>
-                  <label htmlFor="rationale">Rationale (optional)</label>
-                  <input id="rationale" name="rationale" placeholder="why now" />
-                </div>
-                <button className="button" type="submit">Apply</button>
-              </form>
+              <h2 className="sectionTitle">Status</h2>
+              <StatusForm
+                action={setProjectStatus.bind(null, project.id)}
+                currentStatus={project.status}
+                statusOptions={Object.values(ProjectStatus)}
+              />
               <p className="muted small" style={{ marginTop: 8 }}>
                 Promotions are gated on §16.1 fields. Every change is logged as a Decision.
               </p>
@@ -239,18 +231,132 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
             </div>
 
             <div className="card">
-              <h2 className="sectionTitle">GitHub &amp; W&amp;B</h2>
-              <div className="stack">
-                <Labeled label="GitHub repo URL">
-                  <InlineField value={project.githubRepoUrl} field="githubRepoUrl" idForAction={project.id} action={patchProjectField} placeholder="https://github.com/…" />
-                </Labeled>
-                <Labeled label="W&amp;B entity">
-                  <InlineField value={project.wandbEntity} field="wandbEntity" idForAction={project.id} action={patchProjectField} />
-                </Labeled>
-                <Labeled label="W&amp;B project">
-                  <InlineField value={project.wandbProject} field="wandbProject" idForAction={project.id} action={patchProjectField} />
-                </Labeled>
-              </div>
+              <h2 className="sectionTitle">GitHub repos</h2>
+              {project.repoLinks.length === 0 ? (
+                <p className="muted small">No repos linked.</p>
+              ) : (
+                <ul className="stack" style={{ listStyle: "none" }}>
+                  {project.repoLinks.map((r: AnyDef) => (
+                    <li
+                      key={r.id}
+                      className="row"
+                      style={{ justifyContent: "space-between", gap: 8 }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <a
+                          className="link"
+                          href={r.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            wordBreak: "break-all",
+                            fontFamily: "var(--font-geist-mono)",
+                            fontSize: 12,
+                          }}
+                        >
+                          {r.label ?? r.url}
+                        </a>
+                        {r.cachedLastCommitSha ? (
+                          <div className="muted" style={{ fontSize: 10, marginTop: 2 }}>
+                            last commit {r.cachedLastCommitSha.slice(0, 7)}
+                            {r.cachedLastCommitAt
+                              ? ` · ${daysAgoLabel(r.cachedLastCommitAt)}`
+                              : ""}
+                          </div>
+                        ) : null}
+                      </div>
+                      <form action={removeRepoLink.bind(null, r.id)}>
+                        <button
+                          type="submit"
+                          className="button buttonSecondary"
+                          style={{ padding: "2px 8px", fontSize: 11 }}
+                        >
+                          Remove
+                        </button>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form
+                action={addRepoLink.bind(null, project.id)}
+                className="row"
+                style={{ flexWrap: "wrap", gap: 10, marginTop: 12 }}
+              >
+                <div className="field" style={{ flex: "1 1 260px" }}>
+                  <label>Repo URL</label>
+                  <input
+                    name="url"
+                    placeholder="https://github.com/owner/repo"
+                    required
+                  />
+                </div>
+                <div className="field" style={{ minWidth: 160 }}>
+                  <label>Label (optional)</label>
+                  <input name="label" placeholder="main repo / fork / …" />
+                </div>
+                <button className="button" type="submit">
+                  Add repo
+                </button>
+              </form>
+            </div>
+
+            <div className="card">
+              <h2 className="sectionTitle">W&amp;B projects</h2>
+              {project.wandbSources.length === 0 ? (
+                <p className="muted small">No W&amp;B projects linked.</p>
+              ) : (
+                <ul className="stack" style={{ listStyle: "none" }}>
+                  {project.wandbSources.map((s: AnyDef) => (
+                    <li
+                      key={s.id}
+                      className="row"
+                      style={{ justifyContent: "space-between", gap: 8 }}
+                    >
+                      <div
+                        style={{
+                          fontFamily: "var(--font-geist-mono)",
+                          fontSize: 12,
+                        }}
+                      >
+                        {s.entity}
+                        <span className="muted"> / </span>
+                        {s.name}
+                      </div>
+                      <form action={removeWandbSource.bind(null, s.id)}>
+                        <button
+                          type="submit"
+                          className="button buttonSecondary"
+                          style={{ padding: "2px 8px", fontSize: 11 }}
+                        >
+                          Remove
+                        </button>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form
+                action={addWandbSource.bind(null, project.id)}
+                className="row"
+                style={{ flexWrap: "wrap", gap: 10, marginTop: 12 }}
+              >
+                <div className="field" style={{ minWidth: 160 }}>
+                  <label>W&amp;B entity</label>
+                  <input name="entity" placeholder="murnanedaniel" required />
+                </div>
+                <div className="field" style={{ flex: "1 1 200px" }}>
+                  <label>W&amp;B project</label>
+                  <input name="name" placeholder="collider-tracking" required />
+                </div>
+                <button className="button" type="submit">
+                  Add W&amp;B project
+                </button>
+              </form>
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Runs can then be linked to any of these sources via their
+                Log-a-run form.
+              </p>
             </div>
 
             <div className="card">
@@ -649,6 +755,19 @@ function RunsTab({
                     <label>W&amp;B run id</label>
                     <input name="wandbRunId" placeholder="optional" />
                   </div>
+                  {project.wandbSources.length > 0 ? (
+                    <div className="field" style={{ minWidth: 180 }}>
+                      <label>W&amp;B source</label>
+                      <select name="wandbSourceId" defaultValue="">
+                        <option value="">(none)</option>
+                        {project.wandbSources.map((s: AnyDef) => (
+                          <option key={s.id} value={s.id}>
+                            {s.entity}/{s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
                   <div className="field" style={{ minWidth: 160 }}>
                     <label>Ended at</label>
                     <input name="endedAt" type="datetime-local" />

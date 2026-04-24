@@ -1,24 +1,37 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { parseTags } from "@/lib/tags";
-import { TagChips } from "@/components/TagChips";
+import {
+  NewProjectForm,
+  type NewProjectState,
+} from "@/components/NewProjectForm";
 
-async function createProject(formData: FormData) {
+async function createProject(
+  _prev: NewProjectState | null | undefined,
+  formData: FormData,
+): Promise<NewProjectState> {
   "use server";
 
   const title = String(formData.get("title") ?? "").trim();
-  const hypothesis = String(formData.get("hypothesis") ?? "").trim() || null;
   const tagsInput = String(formData.get("tags") ?? "").trim();
+  const hypothesis = String(formData.get("hypothesis") ?? "").trim();
+
+  if (!title) {
+    return {
+      ok: false,
+      error: "Title is required.",
+      title,
+      tags: tagsInput,
+      hypothesis,
+    };
+  }
+
   const tags = parseTags(tagsInput);
-
-  if (!title) throw new Error("Title is required.");
-
   const project = await prisma.project.create({
     data: {
       title,
-      hypothesis,
+      hypothesis: hypothesis || null,
       tags: {
         connectOrCreate: tags.map((name) => ({
           where: { name },
@@ -38,47 +51,13 @@ export default function NewProjectPage() {
       <header className="pageHead">
         <h1 className="pageTitle">New project</h1>
         <p className="pageSub">
-          Start small. Title, tags, one-line hypothesis — flesh out the rest on the
-          project page.
+          Start small. Title, tags, one-line hypothesis — flesh out the rest on
+          the project page.
         </p>
       </header>
 
       <main className="card" style={{ maxWidth: 720 }}>
-        <form className="stack" action={createProject}>
-          <div className="field">
-            <label htmlFor="title">Title</label>
-            <input
-              id="title"
-              name="title"
-              placeholder="e.g. Robust tracking under misalignment"
-              autoFocus
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="tags">Tags</label>
-            <TagChips name="tags" placeholder="tracking, hl-lhc, ingredient" />
-          </div>
-
-          <div className="field">
-            <label htmlFor="hypothesis">One-line hypothesis</label>
-            <input
-              id="hypothesis"
-              name="hypothesis"
-              placeholder="if X then Y because Z"
-            />
-          </div>
-
-          <div className="row">
-            <button className="button" type="submit">
-              Create
-            </button>
-            <Link className="button buttonSecondary" href="/projects">
-              Cancel
-            </Link>
-          </div>
-        </form>
+        <NewProjectForm action={createProject} />
       </main>
     </div>
   );

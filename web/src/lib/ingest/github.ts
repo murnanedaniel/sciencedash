@@ -1,11 +1,9 @@
 import { prisma } from "@/lib/prisma";
 
 /**
- * For each project with a githubRepoUrl, fetch the last commit on the default
- * branch and update lastCommitSha / lastCommitAt / staleAt on the Repo row.
- *
- * We create the Repo row lazily on first pull so existing projects don't need
- * a backfill.
+ * For every RepoLink, fetch the last commit on the default branch and write
+ * the sha/date onto the RepoLink row. We also log a JobRun per link so the
+ * Settings page sees a freshness trail.
  */
 export async function pullGithub(): Promise<{
   updated: number;
@@ -14,14 +12,12 @@ export async function pullGithub(): Promise<{
   const pat = process.env.GITHUB_PAT;
   if (!pat) throw new Error("GITHUB_PAT not set");
 
-  const projects = await prisma.project.findMany({
-    where: { githubRepoUrl: { not: null } },
-  });
+  const links = await prisma.repoLink.findMany();
   let updated = 0;
   let scanned = 0;
-  for (const p of projects) {
+  for (const link of links) {
     scanned++;
-    const parsed = parseGithubUrl(p.githubRepoUrl ?? "");
+    const parsed = parseGithubUrl(link.url);
     if (!parsed) continue;
     const { owner, repo } = parsed;
     const resp = await fetch(
@@ -42,26 +38,30 @@ export async function pullGithub(): Promise<{
     if (!Array.isArray(arr) || arr.length === 0) continue;
     const sha = arr[0]!.sha;
     const at = new Date(arr[0]!.commit.author.date);
-    const staleAt = new Date(at.getTime() + 14 * 24 * 60 * 60 * 1000);
-    updated++;
-    // We don't have a Repo model with projectId FK; store the cache as a JobRun
-    // payload keyed by projectId so /settings can surface freshness without a
-    // schema migration.
+
+    await prisma.repoLink.update({
+      where: { id: link.id },
+      data: {
+        cachedLastCommitSha: sha,
+        cachedLastCommitAt: at,
+      },
+    });
     await prisma.jobRun.create({
       data: {
         kind: "github_pull",
-        projectId: p.id,
+        projectId: link.projectId,
         ok: true,
         startedAt: new Date(),
         endedAt: new Date(),
         payloadJson: JSON.stringify({
+          repoLinkId: link.id,
+          url: link.url,
           sha,
           at: at.toISOString(),
-          staleAt: staleAt.toISOString(),
-          url: p.githubRepoUrl,
         }),
       },
     });
+    updated++;
   }
   return { updated, scanned };
 }

@@ -41,7 +41,10 @@ html {
 html,
 body {
   max-width: 100vw;
-  overflow-x: hidden;
+  /* overflow-x: clip prevents horizontal overflow without turning the
+     viewport into a scroll container (which would break position: fixed
+     ancestry). `clip` is supported in all modern browsers. */
+  overflow-x: clip;
 }
 
 body {
@@ -88,13 +91,17 @@ a {
 }
 
 .topbar {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 20;
+  left: 0;
+  right: 0;
+  height: 72px;
+  z-index: 30;
   padding: 18px 20px;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in oklab, var(--paper) 62%, transparent);
+  background: color-mix(in oklab, var(--paper) 78%, transparent);
   backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .brand {
@@ -398,34 +405,40 @@ textarea:focus {
 
 /* ----- Dashboard shell ----- */
 .shell {
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  min-height: calc(100vh - 72px);
-}
-
-@media (max-width: 880px) {
-  .shell {
-    grid-template-columns: 1fr;
-  }
-  .sidebar {
-    top: 72px;
-    height: auto;
-    max-height: calc(100vh - 72px);
-  }
+  /* Topbar is fixed (72px), sidebar is fixed (220px). Pad the flow so
+     the normal content appears in the visible area, not under them. */
+  padding-top: 72px;
+  padding-left: 220px;
+  min-height: 100vh;
 }
 
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 72px;
-  align-self: start;
-  height: calc(100vh - 72px);
+  left: 0;
+  bottom: 0;
+  width: 220px;
+  z-index: 20;
   overflow-y: auto;
-  z-index: 10;
   border-right: 1px solid var(--border);
   padding: 28px 14px;
   background: color-mix(in oklab, var(--paper) 82%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+}
+
+@media (max-width: 880px) {
+  .shell {
+    padding-left: 0;
+  }
+  .sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 14px;
+  }
 }
 
 .navStack {
@@ -583,6 +596,18 @@ textarea:focus {
   font-family: var(--font-display), ui-serif, Georgia, serif;
   font-size: 18px;
   letter-spacing: -0.01em;
+}
+
+/* Inline-field H1 on project detail: make the underlying input look like
+   the display text until the user interacts with it. */
+.projectTitleInline .inlineInput {
+  font: inherit;
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  min-height: 0;
 }
 
 /* ----- Inline editing ----- */

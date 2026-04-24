@@ -139,15 +139,11 @@ model Project {
   timeline            String?
   nextSteps           String?
 
-  githubRepoUrl       String?
   narrativeReadiness  NarrativeReadiness @default(none)
   narrativeReadinessNote String?
   blockers            String?
 
   aiAutoReviewEnabled Boolean       @default(false)
-
-  wandbEntity         String?
-  wandbProject        String?
 
   tags                Tag[]         @relation("ProjectTags")
 
@@ -158,6 +154,38 @@ model Project {
   decisions           Decision[]
   papers              Paper[]
   notes               NoteProject[]
+  wandbSources        WandbSource[]
+  repoLinks           RepoLink[]
+}
+
+model WandbSource {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  entity      String
+  name        String  // "project" in W&B terms — renamed to avoid collision
+
+  runs        Run[]
+
+  @@unique([projectId, entity, name])
+}
+
+model RepoLink {
+  id                  String    @id @default(cuid())
+  createdAt           DateTime  @default(now())
+
+  projectId           String
+  project             Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  url                 String
+  label               String?
+  cachedLastCommitSha String?
+  cachedLastCommitAt  DateTime?
+
+  @@unique([projectId, url])
 }
 
 model Tag {
@@ -199,6 +227,8 @@ model Run {
 
   name             String
   wandbRunId       String?
+  wandbSourceId    String?
+  wandbSource      WandbSource? @relation(fields: [wandbSourceId], references: [id], onDelete: SetNull)
   status           RunStatus @default(done)
   startedAt        DateTime?
   endedAt          DateTime?
