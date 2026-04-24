@@ -26,6 +26,132 @@ enum ProjectStatus {
   parked
 }
 
+enum NarrativeReadiness {
+  none
+  figures_exist
+  skeleton
+  draftable
+  drafted
+  internal_review
+  ready_to_submit
+}
+
+enum HypothesisStatus {
+  active
+  paused
+  resolved
+}
+
+enum HypothesisVerdict {
+  pending
+  supported
+  refuted
+  abandoned
+  spawned_paper
+}
+
+enum RunStatus {
+  queued
+  running
+  done
+  failed
+}
+
+enum MetricDirection {
+  higher
+  lower
+}
+
+enum ArtifactKind {
+  figure
+  checkpoint
+  table
+  slide
+  dataset
+  other
+}
+
+enum DecisionKind {
+  promote
+  park
+  narrow
+  spawn_paper
+  resolve
+  retire
+  budget_escalate
+  paper_status_change
+  ai_patch_applied
+  other
+}
+
+enum PaperStatus {
+  skeleton
+  draft
+  internal
+  arxiv
+  submitted
+  published
+}
+
+enum PaperSectionKind {
+  intro
+  related
+  method
+  experiments
+  results
+  discussion
+  conclusion
+  figure_list
+  custom
+}
+
+enum NoteKind {
+  paper
+  book
+  talk
+  thread
+  other
+}
+
+enum JobKind {
+  wandb_pull
+  github_pull
+  stall_detect
+  ai_review
+  ai_skeleton
+  ai_audit
+  arxiv_fetch
+  other
+}
+
+enum PromptKind {
+  critical_review
+  paper_skeleton
+  section_polish
+  outer_loop_audit
+}
+
+enum IngredientCategory {
+  globalism
+  sparsity
+  multiscale
+  multitask
+  tokenization
+  curriculum
+  pretraining
+  finetuning
+  gen_vs_masked
+  fusion
+  attention
+}
+
+enum IngredientResult {
+  pending
+  supported
+  refuted
+  mixed
+}
+
 model Project {
   id                  String        @id @default(cuid())
   createdAt           DateTime      @default(now())
@@ -35,16 +161,31 @@ model Project {
   type                ProjectType
   status              ProjectStatus @default(idea)
 
+  description         String?
   hypothesis          String?
   figuresOfMerit      String?
   timeline            String?
   nextSteps           String?
 
   githubRepoUrl       String?
-  narrativeReadiness  String?
+  narrativeReadiness  NarrativeReadiness @default(none)
+  narrativeReadinessNote String?
   blockers            String?
 
+  aiAutoReviewEnabled Boolean       @default(false)
+
+  wandbEntity         String?
+  wandbProject        String?
+
   tags                Tag[]         @relation("ProjectTags")
+
+  hypotheses          Hypothesis[]
+  metricDefinitions   ProjectMetricDefinition[]
+  checkIns            CheckIn[]
+  artifacts           Artifact[]
+  decisions           Decision[]
+  papers              Paper[]
+  notes               NoteProject[]
 }
 
 model Tag {
@@ -53,4 +194,254 @@ model Tag {
   name      String    @unique
 
   projects  Project[] @relation("ProjectTags")
+}
+
+model Hypothesis {
+  id                      String            @id @default(cuid())
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  projectId               String
+  project                 Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title                   String
+  statement               String?
+  status                  HypothesisStatus  @default(active)
+  verdict                 HypothesisVerdict @default(pending)
+
+  computeBudgetGpuHours   Float             @default(10)
+
+  resolvedAt              DateTime?
+
+  runs                    Run[]
+  papers                  HypothesisPaper[]
+  ingredients             HypothesisIngredient[]
+}
+
+model Run {
+  id               String    @id @default(cuid())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  hypothesisId     String
+  hypothesis       Hypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+
+  name             String
+  wandbRunId       String?
+  status           RunStatus @default(done)
+  startedAt        DateTime?
+  endedAt          DateTime?
+  computeGpuHours  Float     @default(0)
+  notes            String?
+
+  metrics          Metric[]
+  artifacts        Artifact[]
+}
+
+model ProjectMetricDefinition {
+  id          String          @id @default(cuid())
+  createdAt   DateTime        @default(now())
+
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name        String
+  unit        String?
+  direction   MetricDirection @default(higher)
+  isPrimary   Boolean         @default(false)
+  threshold   Float?
+
+  metrics     Metric[]
+
+  @@unique([projectId, name])
+}
+
+model Metric {
+  id           String                   @id @default(cuid())
+  createdAt    DateTime                 @default(now())
+
+  runId        String
+  run          Run                      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  definitionId String
+  definition   ProjectMetricDefinition  @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  value        Float
+
+  @@unique([runId, definitionId])
+}
+
+model Artifact {
+  id          String        @id @default(cuid())
+  createdAt   DateTime      @default(now())
+
+  kind        ArtifactKind  @default(other)
+  path        String
+  caption     String?
+
+  projectId   String?
+  project     Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  runId       String?
+  run         Run?          @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  paperId     String?
+  paper       Paper?        @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  paperSectionId String?
+  paperSection PaperSection? @relation(fields: [paperSectionId], references: [id], onDelete: SetNull)
+}
+
+model Paper {
+  id                  String        @id @default(cuid())
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  title               String
+  abstract            String?
+  status              PaperStatus   @default(skeleton)
+
+  arxivId             String?
+  doi                 String?
+  venue               String?
+  plannedVenue        String?
+  submittedAt         DateTime?
+  publishedAt         DateTime?
+
+  primaryProjectId    String?
+  primaryProject      Project?      @relation(fields: [primaryProjectId], references: [id], onDelete: SetNull)
+
+  sections            PaperSection[]
+  hypotheses          HypothesisPaper[]
+  artifacts           Artifact[]
+}
+
+model PaperSection {
+  id          String            @id @default(cuid())
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  paperId     String
+  paper       Paper             @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  kind        PaperSectionKind  @default(custom)
+  title       String
+  contentMd   String            @default("")
+  order       Int               @default(0)
+
+  artifacts   Artifact[]
+}
+
+model HypothesisPaper {
+  hypothesisId String
+  hypothesis   Hypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+
+  paperId      String
+  paper        Paper      @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime   @default(now())
+
+  @@id([hypothesisId, paperId])
+}
+
+model Note {
+  id         String         @id @default(cuid())
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  kind       NoteKind       @default(paper)
+  title      String
+  authors    String?
+  url        String?
+  arxivId    String?
+  summaryMd  String?
+  takeaway   String?
+
+  projects   NoteProject[]
+}
+
+model NoteProject {
+  noteId     String
+  note       Note    @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  projectId  String
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([noteId, projectId])
+}
+
+model JobRun {
+  id           String    @id @default(cuid())
+  kind         JobKind
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  ok           Boolean?
+  error        String?
+  payloadJson  String?
+
+  projectId    String?
+}
+
+model PromptTemplate {
+  id         String      @id @default(cuid())
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  kind       PromptKind  @unique
+  version    Int         @default(1)
+  bodyMd     String
+}
+
+model Ingredient {
+  id           String                 @id @default(cuid())
+  createdAt    DateTime               @default(now())
+
+  category     IngredientCategory
+  name         String
+  description  String?
+
+  hypotheses   HypothesisIngredient[]
+
+  @@unique([category, name])
+}
+
+model HypothesisIngredient {
+  hypothesisId String
+  hypothesis   Hypothesis @relation(fields: [hypothesisId], references: [id], onDelete: Cascade)
+
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  variant      String?
+  result       IngredientResult @default(pending)
+
+  createdAt    DateTime  @default(now())
+
+  @@id([hypothesisId, ingredientId])
+}
+
+model Decision {
+  id           String         @id @default(cuid())
+  at           DateTime       @default(now())
+
+  kind         DecisionKind
+  subjectType  String
+  subjectId    String
+  rationale    String?
+
+  projectId    String?
+  project      Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model CheckIn {
+  id                  String    @id @default(cuid())
+  createdAt           DateTime  @default(now())
+
+  scope               String
+  projectId           String?
+  project             Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  bodyMd              String
+  source              String    @default("manual")
+  proposedPatchJson   String?
 }
