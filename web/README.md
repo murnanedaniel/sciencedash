@@ -44,23 +44,39 @@ npm run build                   # also runs the TypeScript checker
 
 ## "No CLI" launcher (Windows + WSL2)
 
+### One-time setup
+
+Copy the launcher script into `~/bin`:
+
+```bash
+mkdir -p ~/bin
+cp web/scripts/start-sciencedash.sh ~/bin/start-sciencedash.sh
+chmod +x ~/bin/start-sciencedash.sh
+```
+
+The script activates fnm explicitly. It's needed because `wsl.exe -e bash -lc` spawns a non-interactive login shell, and the standard Ubuntu `~/.bashrc` early-returns in non-interactive mode (line 5–9), so the fnm block further down never runs. Sourcing `.bashrc` doesn't help for the same reason — the script has to set `FNM_PATH` and `eval $(fnm env)` itself.
+
 ### Option A: one-click `.cmd` (recommended)
 
-Create `StartScienceDash.cmd` on Windows:
+Create `StartScienceDash.cmd` on your Windows desktop:
 
-```
-wsl -d Ubuntu -e bash -lc "cd /home/<you>/Research/ScienceDash/web && fnm use 20.19.0 >/dev/null 2>&1 || true && npm run start"
-start http://localhost:3000
+```cmd
+@echo off
+REM Launch the server in its own WSL console (so you can see logs / Ctrl-C it later).
+start "ScienceDash" wsl.exe -d Ubuntu bash -c "~/bin/start-sciencedash.sh"
+
+REM Poll :3000 up to 60s, then open the browser only once it's actually up.
+powershell -NoProfile -Command "for ($i=0; $i -lt 60; $i++) { try { Invoke-WebRequest -Uri 'http://localhost:3000' -UseBasicParsing -TimeoutSec 2 -MaximumRedirection 0 -ErrorAction Stop | Out-Null; Start-Process 'http://localhost:3000'; exit } catch { if ($_.Exception.Response.StatusCode.value__ -ge 200) { Start-Process 'http://localhost:3000'; exit } } Start-Sleep -Seconds 1 }"
 ```
 
-Add `npm run build &&` before `npm run start` if you want a fresh build on every launch (slower).
+The separate console window lets you see server logs and stop with Ctrl-C. The polling PowerShell opens the browser the moment the server is ready — not before, and not after a fixed delay.
 
 ### Option B: Task Scheduler (auto-start at login)
 
 - Trigger: **At log on**
 - Action: **Start a program**
   - Program: `wsl.exe`
-  - Arguments: `-d Ubuntu -e bash -lc "cd /home/<you>/Research/ScienceDash/web && fnm use 20.19.0 >/dev/null 2>&1 || true && npm run start"`
+  - Arguments: `-d Ubuntu bash -c "~/bin/start-sciencedash.sh"`
 
 Pin `http://localhost:3000` as a browser bookmark.
 
