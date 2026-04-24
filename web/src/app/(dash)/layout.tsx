@@ -1,5 +1,6 @@
 import { SidebarLink } from "@/components/SidebarLink";
 import { CommandPalette } from "@/components/CommandPalette";
+import { HelpButton } from "@/components/HelpButton";
 import { prisma } from "@/lib/prisma";
 
 export default async function DashLayout({
@@ -42,6 +43,7 @@ export default async function DashLayout({
       </aside>
       <div className="main">{children}</div>
       <CommandPalette projects={projects} papers={papers} />
+      <HelpButton />
     </div>
   );
 }
