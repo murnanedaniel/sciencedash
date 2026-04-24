@@ -3,6 +3,11 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { HelpButton } from "@/components/HelpButton";
 import { prisma } from "@/lib/prisma";
 
+// Every dashboard page reads live data from SQLite. Opt out of Next's
+// static prerender so pages reflect the current DB on every request
+// (not the empty DB that existed at build time).
+export const dynamic = "force-dynamic";
+
 export default async function DashLayout({
   children,
 }: {

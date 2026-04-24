@@ -98,27 +98,36 @@ export default async function PortfolioPage() {
                 <span>{s}</span>
               </div>
             ))}
-            {Object.values(ProjectType).map((t) => (
-              <>
-                <div key={`label-${t}`} className="cell" style={{ background: "transparent", border: 0, textAlign: "left" }}>
-                  <strong style={{ fontSize: 14 }}>{t}</strong>
-                </div>
-                {Object.values(ProjectStatus).map((s) => {
-                  const c = counts.get(`${t}::${s}`) ?? 0;
-                  return (
-                    <Link
-                      key={`${t}-${s}`}
-                      href={`/projects?type=${t}&status=${s}`}
-                      className="cell"
-                      style={{ textDecoration: "none" }}
-                    >
-                      <strong>{c}</strong>
-                      <span>{t}·{s}</span>
-                    </Link>
-                  );
-                })}
-              </>
-            ))}
+            {Object.values(ProjectType).flatMap((t) => [
+              <div
+                key={`label-${t}`}
+                className="cell"
+                style={{
+                  background: "transparent",
+                  border: 0,
+                  textAlign: "left",
+                }}
+              >
+                <strong style={{ fontSize: 14 }}>{t}</strong>
+              </div>,
+              ...Object.values(ProjectStatus).map((s) => {
+                const c = counts.get(`${t}::${s}`) ?? 0;
+                return (
+                  <Link
+                    key={`${t}-${s}`}
+                    href={`/projects?type=${t}&status=${s}`}
+                    className="cell"
+                    style={{
+                      textDecoration: "none",
+                      opacity: c === 0 ? 0.35 : 1,
+                    }}
+                    title={`${t} · ${s}`}
+                  >
+                    <strong>{c}</strong>
+                  </Link>
+                );
+              }),
+            ])}
           </div>
         </div>
 

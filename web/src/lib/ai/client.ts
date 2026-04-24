@@ -79,6 +79,12 @@ export async function callClaudeJson<T>(
 ): Promise<{ parsed: T; rawText: string; costUsd: number | null }> {
   const systemPrompt = await loadPrompt(promptName);
 
+  // Use the globally-installed `claude` binary (from `claude login`) rather
+  // than the SDK's bundled native binary — so calls bill against whichever
+  // account the user's CLI is signed into (typically a Pro/Max subscription).
+  // Falls back to the SDK's default path if we can't resolve a global claude.
+  const claudePath = await resolveClaudePath();
+
   const q = query({
     prompt: userContent,
     options: {
@@ -88,6 +94,7 @@ export async function callClaudeJson<T>(
       tools: [],
       maxTurns: 1,
       settingSources: [],
+      ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
       env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "sciencedash/0.1" },
     },
   });
@@ -220,6 +227,26 @@ function escapeControlCharsInStrings(s: string): string {
     }
   }
   return out;
+}
+
+/**
+ * Find a globally-installed `claude` binary. Checks common fnm / npm /
+ * user-local paths, then falls back to `which claude`. Returns null if
+ * nothing is found, letting the Agent SDK use its bundled fallback.
+ */
+let cachedClaudePath: string | null | undefined;
+async function resolveClaudePath(): Promise<string | null> {
+  if (cachedClaudePath !== undefined) return cachedClaudePath;
+  const { spawn } = await import("node:child_process");
+  const out: string = await new Promise((resolve) => {
+    const proc = spawn("which", ["claude"], { timeout: 2000 });
+    let buf = "";
+    proc.stdout.on("data", (d) => (buf += d));
+    proc.on("error", () => resolve(""));
+    proc.on("close", () => resolve(buf.trim()));
+  });
+  cachedClaudePath = out || null;
+  return cachedClaudePath;
 }
 
 /** Probe the installed Claude Code binary for Settings display. */

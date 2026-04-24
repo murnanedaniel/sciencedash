@@ -75,7 +75,12 @@ export default async function PapersPage() {
               </Link>
             ))}
             {byStatus[col]!.length === 0 ? (
-              <div className="muted small" style={{ padding: "4px 6px" }}>—</div>
+              <div
+                className="muted small"
+                style={{ padding: "4px 6px", opacity: 0.35, fontStyle: "italic" }}
+              >
+                empty
+              </div>
             ) : null}
           </div>
         ))}

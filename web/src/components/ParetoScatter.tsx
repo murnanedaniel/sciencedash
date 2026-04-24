@@ -34,10 +34,21 @@ export function ParetoScatter({
 
   const xs = plotted.map((p) => p.metrics[xAxis]!);
   const ys = plotted.map((p) => p.metrics[yAxis]!);
-  const xmin = Math.min(...xs, 0);
-  const xmax = Math.max(...xs, 1);
-  const ymin = Math.min(...ys, 0);
-  const ymax = Math.max(...ys, 1);
+  // Fit the axes to the data with a 5% margin (±0.5 fallback when all
+  // values are equal). Earlier versions clamped to [0, 1] which squashed
+  // every realistic metric (e.g. efficiencies of 0.97–0.99) into a corner.
+  const rangeWithMargin = (lo: number, hi: number): [number, number] => {
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [0, 1];
+    if (lo === hi) return [lo - 0.5, hi + 0.5];
+    const pad = (hi - lo) * 0.05;
+    return [lo - pad, hi + pad];
+  };
+  const [xmin, xmax] = xs.length
+    ? rangeWithMargin(Math.min(...xs), Math.max(...xs))
+    : [0, 1];
+  const [ymin, ymax] = ys.length
+    ? rangeWithMargin(Math.min(...ys), Math.max(...ys))
+    : [0, 1];
 
   const W = 520;
   const H = 360;
