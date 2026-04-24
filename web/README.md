@@ -1,70 +1,103 @@
-ScienceDash is a private, local-first research dashboard to track projects (exploit / explore / system), hypotheses, figures of merit, and next steps.
+# web/
 
-## Getting Started
+Next.js 16 + Prisma 7 + SQLite app. The user-facing quick start is in [`../README.md`](../README.md); this file covers dev specifics.
 
-### Local dev (WSL2)
+## Stack notes
 
-Prereqs:
+- **Next.js 16** — `params` and `searchParams` are Promises (must `await`). Server actions via `.bind()`. Background jobs boot from `src/instrumentation.ts`. Read `node_modules/next/dist/docs/01-app/` before reaching for any Next API — APIs and conventions have shifted from earlier versions (see `AGENTS.md`).
+- **Prisma 7** — generated client at `src/generated/prisma` (gitignored). `mode: "insensitive"` on SQLite is a soft in-app filter, not a DB operator — fine at current row counts but plan around it for any large-table search.
+- **better-sqlite3** — synchronous driver via `@prisma/adapter-better-sqlite3`. DB is a single file at `./dev.db`.
 
-- Node >= 20.19 (this repo uses Prisma 7)
+## Install
 
-Install deps:
+```bash
+npm install
+npx prisma migrate dev          # one-time DB setup
+npx prisma generate             # only needed if schema changed
+```
 
-- `npm install`
+## Run
 
-Run migrations (first time only):
+```bash
+npm run dev                     # dev with HMR
+npm run build && npm run start  # production build (background worker only boots in this mode)
+```
 
-- `npx prisma migrate dev`
+The worker boots once per Node process. In `next dev`, only the first ticked-up server-component request triggers it; production is cleaner.
 
-Start dev server:
+## Schema changes
 
-- `npm run dev`
+```bash
+# Edit prisma/schema.prisma, then:
+npx prisma migrate dev --name <descriptive_name>
+npx prisma generate
+```
 
-Open `http://localhost:3000` in your browser.
+The Prisma client output path is `src/generated/prisma`. Migrations are applied to `dev.db` immediately.
 
-### Production-ish local mode
+## Lint and typecheck
 
-- `npm run build`
-- `npm run start`
+```bash
+npm run lint
+npm run build                   # also runs the TypeScript checker
+```
 
-The SQLite DB is stored at `./dev.db` by default (see `.env`).
-
-## “No CLI” launcher (Windows + WSL2)
-
-The simplest approach is a Windows shortcut or Task Scheduler entry that starts the server inside WSL.
+## "No CLI" launcher (Windows + WSL2)
 
 ### Option A: one-click `.cmd` (recommended)
 
-Create a file on Windows, for example `StartScienceDash.cmd`, containing:
+Create `StartScienceDash.cmd` on Windows:
 
-- `wsl -d Ubuntu -e bash -lc "cd /home/murnanedaniel/Research/ScienceDash/web && fnm use 20.19.0 >/dev/null 2>&1 || true && npm run build && npm run start"`
+```
+wsl -d Ubuntu -e bash -lc "cd /home/<you>/Research/ScienceDash/web && fnm use 20.19.0 >/dev/null 2>&1 || true && npm run start"
+start http://localhost:3000
+```
 
-Then double-click it.
+Add `npm run build &&` before `npm run start` if you want a fresh build on every launch (slower).
 
-Notes:
-
-- If you prefer faster startup, remove `npm run build` once you have a stable build, and run it only when you update code.
-- If you want the browser to open automatically, add a second line: `start http://localhost:3000`
-
-### Option B: Windows Task Scheduler (auto-start on login)
-
-Create a scheduled task:
+### Option B: Task Scheduler (auto-start at login)
 
 - Trigger: **At log on**
 - Action: **Start a program**
-  - Program/script: `wsl.exe`
-  - Add arguments: `-d Ubuntu -e bash -lc "cd /home/murnanedaniel/Research/ScienceDash/web && fnm use 20.19.0 >/dev/null 2>&1 || true && npm run start"`
+  - Program: `wsl.exe`
+  - Arguments: `-d Ubuntu -e bash -lc "cd /home/<you>/Research/ScienceDash/web && fnm use 20.19.0 >/dev/null 2>&1 || true && npm run start"`
 
-Then pin `http://localhost:3000` as a browser bookmark (or add it to Startup as a URL shortcut).
+Pin `http://localhost:3000` as a browser bookmark.
 
 ## Backups
 
-Because the DB is a single SQLite file, backing up is as simple as copying `dev.db` while the app is stopped.
+`dev.db` is the entire database. Stop the server, then `cp dev.db ~/Backups/sciencedash-$(date +%F).db`. Artifact uploads live under `.data/artifacts/`.
 
-## Learn More
+## Project layout
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Prisma Docs](https://www.prisma.io/docs)
-
+```
+src/
+  app/
+    (dash)/                # route group with persistent sidebar
+      page.tsx             # /today
+      projects/
+      papers/
+      runs/
+      reading/
+      ingredients/
+      portfolio/
+      settings/
+    api/
+      ai/                  # /api/ai/{review,skeleton,polish,audit}
+      jobs/run/            # manual "pull now" trigger
+      ingest/arxiv/        # arxiv autofill
+      artifacts/[name]/    # served local files
+  components/              # client components (InlineField, CommandPalette, etc.)
+  lib/
+    server/                # server-action modules
+    ai/                    # Claude Agent SDK client + prompt templates
+    ingest/                # W&B, GitHub, arXiv
+    worker/                # in-process scheduler
+    paperTemplate.ts       # default paper section seeds
+    ingredientSeed.ts      # default ingredient categories
+  generated/prisma/        # gitignored — regen with `npx prisma generate`
+  instrumentation.ts       # Next 16 hook that boots the worker
+prisma/
+  schema.prisma
+  migrations/
+```
