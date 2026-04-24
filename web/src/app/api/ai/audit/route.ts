@@ -15,6 +15,7 @@ type AuditOutput = {
 export async function POST() {
   const projects = await prisma.project.findMany({
     include: {
+      tags: { select: { name: true } },
       hypotheses: { include: { runs: true } },
       decisions: { orderBy: { at: "desc" }, take: 3 },
     },
@@ -27,7 +28,7 @@ export async function POST() {
     {
       projects: projects.map((p) => ({
         title: p.title,
-        type: p.type,
+        tags: p.tags.map((t) => t.name),
         status: p.status,
         narrativeReadiness: p.narrativeReadiness,
         hypotheses: p.hypotheses.length,

@@ -8,7 +8,6 @@ import { recordDecision } from "@/lib/server/decisions";
 import { checkPromotion } from "@/lib/server/promotion";
 import type {
   ProjectStatus,
-  ProjectType,
   NarrativeReadiness,
   HypothesisStatus,
   HypothesisVerdict,

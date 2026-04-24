@@ -30,19 +30,20 @@ export default async function DashLayout({
     <div className="shell">
       <aside className="sidebar">
         <nav className="navStack">
-          <SidebarLink href="/" label="Today" hotkey="T" />
-          <SidebarLink href="/projects" label="Projects" hotkey="P" />
-          <SidebarLink href="/papers" label="Papers" hotkey="A" />
-          <SidebarLink href="/runs" label="Runs" hotkey="R" />
-          <SidebarLink href="/reading" label="Reading" hotkey="N" />
+          <SidebarLink href="/" label="Today" hotkey="g T" />
+          <SidebarLink href="/projects" label="Projects" hotkey="g P" />
+          <SidebarLink href="/papers" label="Papers" hotkey="g A" />
+          <SidebarLink href="/runs" label="Runs" hotkey="g R" />
+          <SidebarLink href="/reading" label="Reading" hotkey="g N" />
           <div className="navDivider" />
-          <SidebarLink href="/ingredients" label="Ingredients" hotkey="I" />
-          <SidebarLink href="/portfolio" label="Portfolio" hotkey="O" />
+          <SidebarLink href="/portfolio" label="Portfolio" hotkey="g O" />
           <div className="navDivider" />
-          <SidebarLink href="/settings" label="Settings" hotkey="S" />
+          <SidebarLink href="/settings" label="Settings" hotkey="g S" />
           <div className="navDivider" />
-          <div className="muted small" style={{ padding: "6px 12px" }}>
-            ⌘K · command
+          <div className="muted small" style={{ padding: "6px 12px", lineHeight: 1.5 }}>
+            ⌘K · palette
+            <br />? · help
+            <br />n · new project
           </div>
         </nav>
       </aside>

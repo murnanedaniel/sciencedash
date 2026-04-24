@@ -23,6 +23,7 @@ import { spawnPaperFromHypothesis } from "@/lib/server/paperActions";
 import { createCheckIn } from "@/lib/server/checkInActions";
 import { RunAiReviewButton } from "@/components/RunAiReviewButton";
 import { ParetoScatter } from "@/components/ParetoScatter";
+import { TagChips } from "@/components/TagChips";
 import {
   ProjectStatus,
   NarrativeReadiness,
@@ -89,10 +90,19 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
         <div className="stackTight">
           <h1 className="pageTitle">{project.title}</h1>
           <div className="rowWrap">
-            <span className="pill">
-              <span style={{ color: "var(--accent)" }}>{project.type}</span>
-            </span>
             <span className="pill pillMuted">{project.status}</span>
+            {project.tags && project.tags.length > 0 ? (
+              <>
+                {project.tags.slice(0, 4).map((t) => (
+                  <span key={t.id} className="pill">
+                    <span style={{ color: "var(--accent)" }}>#{t.name}</span>
+                  </span>
+                ))}
+                {project.tags.length > 4 ? (
+                  <span className="pill pillMuted">+{project.tags.length - 4}</span>
+                ) : null}
+              </>
+            ) : null}
             {project.aiAutoReviewEnabled ? (
               <span className="pill" title="AI auto-review on stall">AI auto</span>
             ) : null}
@@ -245,18 +255,19 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
 
             <div className="card">
               <h2 className="sectionTitle">Tags</h2>
-              <form action={updateProjectTags.bind(null, project.id)} className="row" style={{ gap: 10 }}>
-                <input
+              <form action={updateProjectTags.bind(null, project.id)} className="stack">
+                <TagChips
                   name="tags"
-                  defaultValue={project.tags.map((t) => t.name).join(", ")}
-                  placeholder="tracking, hl-lhc, misalignment"
-                  style={{ flex: 1 }}
+                  initial={project.tags.map((t: AnyDef) => t.name).join(", ")}
+                  placeholder="tracking, hl-lhc, ingredient"
                 />
-                <button className="button" type="submit">Save</button>
+                <button className="button" type="submit" style={{ width: "fit-content" }}>
+                  Save tags
+                </button>
               </form>
               {project.tags.length ? (
                 <div className="rowWrap" style={{ marginTop: 10 }}>
-                  {project.tags.map((t) => (
+                  {project.tags.map((t: AnyDef) => (
                     <Link key={t.id} className="pill" href={`/projects?tags=${encodeURIComponent(t.name)}`}>#{t.name}</Link>
                   ))}
                 </div>

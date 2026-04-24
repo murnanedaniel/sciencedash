@@ -1,12 +1,16 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { daysAgoLabel, formatUtc, relativeDays } from "@/lib/format";
-import { ProjectStatus, ProjectType, PaperStatus } from "@/generated/prisma/client";
+import { ProjectStatus, PaperStatus } from "@/generated/prisma/client";
 import { RunAiAuditButton } from "@/components/RunAiAuditButton";
+
+const KIND_TAGS = ["exploit", "explore", "system"] as const;
+type KindTag = (typeof KIND_TAGS)[number];
 
 export default async function PortfolioPage() {
   const projects = await prisma.project.findMany({
     include: {
+      tags: { select: { name: true } },
       hypotheses: { include: { runs: { orderBy: { endedAt: "desc" }, take: 1 } } },
       decisions: { orderBy: { at: "desc" }, take: 1 },
       checkIns: { orderBy: { createdAt: "desc" }, take: 1 },
@@ -19,11 +23,10 @@ export default async function PortfolioPage() {
     include: { project: { select: { title: true, id: true } } },
   });
 
-  // Type × status heatmap counts
-  const counts = new Map<string, number>();
+  // Status counts
+  const statusCounts = new Map<string, number>();
   for (const p of projects) {
-    const k = `${p.type}::${p.status}`;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
+    statusCounts.set(p.status, (statusCounts.get(p.status) ?? 0) + 1);
   }
 
   // Stalled active
@@ -63,10 +66,24 @@ export default async function PortfolioPage() {
     a.localeCompare(b),
   );
 
-  // Explore / exploit / system balance
-  const balance = { exploit: 0, explore: 0, system: 0 };
-  for (const p of projects) balance[p.type] += 1;
-  const total = balance.exploit + balance.explore + balance.system || 1;
+  // Exploit / explore / system balance — from the #exploit / #explore / #system
+  // tags (if the user uses them). Projects tagged with none of them count as
+  // "untagged" and show in the balance as a neutral slice.
+  const balance: Record<KindTag | "untagged", number> = {
+    exploit: 0,
+    explore: 0,
+    system: 0,
+    untagged: 0,
+  };
+  for (const p of projects) {
+    const kinds = (p.tags as { name: string }[])
+      .map((t) => t.name)
+      .filter((n): n is KindTag => (KIND_TAGS as readonly string[]).includes(n));
+    if (kinds.length === 0) balance.untagged += 1;
+    else for (const k of kinds) balance[k] += 1;
+  }
+  const balanceTotal =
+    balance.exploit + balance.explore + balance.system + balance.untagged || 1;
 
   return (
     <div className="container">
@@ -88,62 +105,67 @@ export default async function PortfolioPage() {
           <Tile label="Papers published" value={papers.filter((p) => p.status === "published").length} />
         </div>
 
-        {/* Heatmap type x status */}
+        {/* Status summary */}
         <div className="card">
-          <h2 className="sectionTitle">Type × status</h2>
-          <div className="heatmap" style={{ gridTemplateColumns: `120px repeat(${Object.values(ProjectStatus).length}, minmax(0, 1fr))` }}>
-            <div className="cell" style={{ background: "transparent", border: 0 }}></div>
-            {Object.values(ProjectStatus).map((s) => (
-              <div key={s} className="cell" style={{ background: "transparent", border: 0 }}>
-                <span>{s}</span>
-              </div>
-            ))}
-            {Object.values(ProjectType).flatMap((t) => [
-              <div
-                key={`label-${t}`}
-                className="cell"
-                style={{
-                  background: "transparent",
-                  border: 0,
-                  textAlign: "left",
-                }}
-              >
-                <strong style={{ fontSize: 14 }}>{t}</strong>
-              </div>,
-              ...Object.values(ProjectStatus).map((s) => {
-                const c = counts.get(`${t}::${s}`) ?? 0;
-                return (
-                  <Link
-                    key={`${t}-${s}`}
-                    href={`/projects?type=${t}&status=${s}`}
-                    className="cell"
-                    style={{
-                      textDecoration: "none",
-                      opacity: c === 0 ? 0.35 : 1,
-                    }}
-                    title={`${t} · ${s}`}
-                  >
-                    <strong>{c}</strong>
-                  </Link>
-                );
-              }),
-            ])}
+          <h2 className="sectionTitle">Projects by status</h2>
+          <div
+            className="heatmap"
+            style={{
+              gridTemplateColumns: `repeat(${Object.values(ProjectStatus).length}, minmax(0, 1fr))`,
+            }}
+          >
+            {Object.values(ProjectStatus).map((s) => {
+              const c = statusCounts.get(s) ?? 0;
+              return (
+                <Link
+                  key={s}
+                  href={`/projects?status=${s}`}
+                  className="cell"
+                  style={{
+                    textDecoration: "none",
+                    opacity: c === 0 ? 0.35 : 1,
+                  }}
+                  title={s}
+                >
+                  <strong>{c}</strong>
+                  <span>{s}</span>
+                </Link>
+              );
+            })}
           </div>
         </div>
 
-        {/* Balance */}
+        {/* Kind balance (driven by #exploit/#explore/#system tags) */}
         <div className="card">
-          <h2 className="sectionTitle">Explore / exploit / system balance</h2>
+          <h2 className="sectionTitle">Kind balance (from tags)</h2>
           <div className="row" style={{ gap: 6 }}>
-            <BalanceBar kind="exploit" v={balance.exploit / total} />
-            <BalanceBar kind="explore" v={balance.explore / total} />
-            <BalanceBar kind="system" v={balance.system / total} />
+            <BalanceBar kind="exploit" v={balance.exploit / balanceTotal} />
+            <BalanceBar kind="explore" v={balance.explore / balanceTotal} />
+            <BalanceBar kind="system" v={balance.system / balanceTotal} />
+            {balance.untagged > 0 ? (
+              <BalanceBar kind="untagged" v={balance.untagged / balanceTotal} />
+            ) : null}
           </div>
-          <div className="row" style={{ gap: 18, marginTop: 8 }}>
-            <span className="muted small">exploit · {balance.exploit}</span>
-            <span className="muted small">explore · {balance.explore}</span>
-            <span className="muted small">system · {balance.system}</span>
+          <div className="row" style={{ gap: 18, marginTop: 8, flexWrap: "wrap" }}>
+            <Link className="muted small link" href="/projects?tags=exploit">
+              #exploit · {balance.exploit}
+            </Link>
+            <Link className="muted small link" href="/projects?tags=explore">
+              #explore · {balance.explore}
+            </Link>
+            <Link className="muted small link" href="/projects?tags=system">
+              #system · {balance.system}
+            </Link>
+            {balance.untagged > 0 ? (
+              <span className="muted small">
+                no kind tag · {balance.untagged}
+              </span>
+            ) : null}
           </div>
+          <p className="muted small" style={{ marginTop: 10 }}>
+            Driven entirely by tags. Tag a project <code>#exploit</code>,{" "}
+            <code>#explore</code>, or <code>#system</code> to include it here.
+          </p>
         </div>
 
         {/* Publication velocity */}
@@ -249,7 +271,7 @@ function BalanceBar({
   kind,
   v,
 }: {
-  kind: "exploit" | "explore" | "system";
+  kind: "exploit" | "explore" | "system" | "untagged";
   v: number;
 }) {
   const label = kind;
@@ -258,7 +280,9 @@ function BalanceBar({
       ? "var(--accent)"
       : kind === "explore"
         ? "var(--accent2)"
-        : "var(--muted)";
+        : kind === "system"
+          ? "var(--muted)"
+          : "var(--faint)";
   return (
     <div
       style={{

@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
+      tags: { select: { name: true } },
       hypotheses: {
         include: {
           runs: {
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     {
       project: {
         title: project.title,
-        type: project.type,
+        tags: project.tags.map((t) => t.name),
         status: project.status,
         description: project.description,
         hypothesis: project.hypothesis,

@@ -36,7 +36,7 @@ No `ANTHROPIC_API_KEY` — AI features go through Claude Code (`claude login`) s
 
 The fastest path from "I have an idea" to "I have a paper skeleton":
 
-1. **Press `n`** (or click *New project*). Title + type + one-line hypothesis. Create.
+1. **Press `n`** (or click *New project*). Title + tags + one-line hypothesis. Create. Tag it `exploit` / `explore` / `system` if you want those groupings on the Portfolio page — there's a row of chips you can click.
 2. On the project page, fill the §16.1 fields (hypothesis, FOM, timeline, next steps). Status `idea → active` is gated until they're set.
 3. Switch to **Hypotheses & Runs**. Declare a primary metric (`tracking_efficiency`, higher better, threshold 0.99). Add a hypothesis with a 10 GPU-h budget.
 4. Log runs as you go — name, GPU-h spent, metric values. The compute meter goes amber when you blow past budget.
@@ -52,17 +52,18 @@ Every status change, paper spawn, hypothesis resolution, and accepted AI patch w
 | Route | What it's for |
 |---|---|
 | `/` | **Today** — first-hour ritual. Stalled / narrative-ready / recent runs / pending AI reviews. One card per zone. |
-| `/projects` | List with type / status / tag / FOM / timeline / next-steps filters. |
+| `/projects` | List with status / tag / FOM / timeline / next-steps filters. |
 | `/projects/[id]` | Three tabs: Overview (inline-edit fields, AI review), Hypotheses & Runs (cards + Pareto), Activity (decision log). |
 | `/papers` | Kanban: skeleton → draft → internal → arxiv → submitted → published. |
 | `/papers/[id]` | Section-by-section markdown editor, figure attachments, `.tex` export. |
 | `/runs` | Sortable table across all hypotheses with dynamic metric columns. |
 | `/reading` | Notes; paste an arXiv URL → autofill title / authors / abstract. |
-| `/ingredients` | Brand-free grid scan (§6.2): ingredient × project matrix. Markdown export. |
-| `/portfolio` | Outer-loop view: heatmap, balance, publication velocity, decision log, AI audit. |
+| `/portfolio` | Outer-loop view: status summary, publication velocity, decision log, AI audit. |
 | `/settings` | Claude Code / W&B / GitHub status, worker heartbeat, job log, prompt editor, per-project AI auto-review toggles. |
 
-**Keyboard:** ⌘K palette · `/` search · `n` new project · `g t` Today · `g p` Projects · `g a` Papers · `g r` Runs · `g n` Notes · `g i` Ingredients · `g o` Portfolio · `g s` Settings.
+**Keyboard:** `⌘K` / `Ctrl-K` opens the command palette (jump to project, paper, or route). `/` also opens it when you're not typing. `?` opens the in-app help drawer. `g T` jumps to Today, `g P` Projects, `g A` Papers, `g R` Runs, `g N` Notes, `g O` Portfolio, `g S` Settings. `n` creates a new project. `Esc` closes any overlay. Inside the palette: arrow keys + Enter to navigate.
+
+**Tags, not fixed categories.** Projects aren't categorized by a built-in `type` or `ingredient` field — everything is tags. The new-project and project-edit forms surface a row of clickable common-tag chips (`exploit`, `explore`, `system`, `tracking`, `ingredient`, `hl-lhc`, …) so you can classify with one click, but nothing is baked into the schema.
 
 ---
 

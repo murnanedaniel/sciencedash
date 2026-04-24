@@ -51,7 +51,6 @@ export function CommandPalette({
               a: "/papers",
               r: "/runs",
               n: "/reading",
-              i: "/ingredients",
               o: "/portfolio",
               s: "/settings",
             };
@@ -99,13 +98,6 @@ export function CommandPalette({
         sub: "outer loop",
         action: () => router.push("/portfolio"),
         kbd: "g o",
-      },
-      {
-        id: "go-ingredients",
-        label: "Ingredients",
-        sub: "grid scan",
-        action: () => router.push("/ingredients"),
-        kbd: "g i",
       },
       {
         id: "go-papers",
