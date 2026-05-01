@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { daysAgoLabel, relativeDays, formatUtc } from "@/lib/format";
 import { createCheckIn, applyProposedPatch } from "@/lib/server/checkInActions";
+import { DigestPanel } from "@/components/DigestPanel";
 
 export default async function TodayPage() {
   const projects = await prisma.project.findMany({
@@ -63,6 +64,8 @@ export default async function TodayPage() {
         <h1 className="pageTitle">Today</h1>
         <p className="pageSub">First-hour ritual. Small moves, logged.</p>
       </header>
+
+      <DigestPanel />
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", marginBottom: 18 }}>
         <Zone title="Stalled">

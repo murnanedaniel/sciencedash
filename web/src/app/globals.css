@@ -893,6 +893,30 @@ textarea:focus {
   color: var(--ink);
 }
 
+/* ----- Literature-tab paper title ----- */
+.litTitle {
+  color: var(--ink);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+.litTitle:hover {
+  color: color-mix(in oklab, var(--accent) 70%, var(--ink) 30%);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.litTitleArrow {
+  font-size: 12px;
+  color: var(--faint);
+  margin-left: 2px;
+  position: relative;
+  top: -2px;
+  transition: color 120ms ease;
+}
+.litTitle:hover .litTitleArrow {
+  color: var(--accent);
+}
+
 /* ----- Pareto ----- */
 .pareto {
   background: color-mix(in oklab, var(--paper) 90%, transparent);
@@ -907,6 +931,64 @@ textarea:focus {
   fill: var(--faint);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+/* ----- Inline hint (hover / focus tooltip) ----- */
+.hint {
+  position: relative;
+  cursor: help;
+  display: inline-block;
+}
+.hint:focus { outline: none; }
+.hintLabel {
+  border-bottom: 1px dotted color-mix(in oklab, var(--ink) 35%, transparent);
+}
+.hintBody {
+  position: absolute;
+  z-index: 50;
+  left: 0;
+  top: calc(100% + 4px);
+  width: max-content;
+  max-width: 360px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 80ms ease, transform 80ms ease;
+  white-space: normal;
+}
+.hintBodyWide { max-width: 480px; }
+.hint:hover .hintBody,
+.hint:focus-within .hintBody {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ----- Docs page (long-form tutorial) ----- */
+.docsBody {
+  max-width: 90ch;
+}
+.docsBody table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.6em 0 1.2em;
+  font-size: 14px;
+}
+.docsBody th, .docsBody td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.docsBody th {
+  background: color-mix(in oklab, var(--paper) 75%, transparent);
+  font-weight: 600;
 }
 
 /* ----- Markdown preview ----- */

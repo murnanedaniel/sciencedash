@@ -11,13 +11,19 @@ export type PromptName =
   | "critical-review"
   | "skeleton"
   | "polish"
-  | "outer-loop-audit";
+  | "outer-loop-audit"
+  | "repo-quickstart"
+  | "literature-review"
+  | "project-brain";
 
 const KIND_MAP: Record<PromptName, string> = {
   "critical-review": "critical_review",
   skeleton: "paper_skeleton",
   polish: "section_polish",
   "outer-loop-audit": "outer_loop_audit",
+  "repo-quickstart": "repo_quickstart",
+  "literature-review": "literature_review",
+  "project-brain": "project_brain",
 };
 
 const FILE_MAP: Record<PromptName, string> = {
@@ -25,7 +31,15 @@ const FILE_MAP: Record<PromptName, string> = {
   skeleton: "skeleton.md",
   polish: "polish.md",
   "outer-loop-audit": "outer-loop-audit.md",
+  "repo-quickstart": "repo-quickstart.md",
+  "literature-review": "literature-review.md",
+  "project-brain": "project-brain.md",
 };
+
+/** Re-exported so agent streaming code can use the same loader logic. */
+export async function loadPromptPublic(name: PromptName): Promise<string> {
+  return loadPrompt(name);
+}
 
 async function loadPrompt(name: PromptName): Promise<string> {
   const row = await prisma.promptTemplate.findUnique({
@@ -49,16 +63,63 @@ export async function runAi<T>(
   });
   try {
     const out = await fn();
+    // Synthesise a minimal trace so /jobs/<id> shows something useful even
+    // for single-shot callClaudeJson paths (which don't stream). Expect
+    // callClaudeJson's shape `{ parsed, rawText, costUsd }` but gracefully
+    // skip if fn returns something else.
+    const trace: string[] = [];
+    let costUsd: number | null = null;
+    if (out && typeof out === "object") {
+      const r = out as { rawText?: unknown; costUsd?: unknown };
+      if (typeof r.rawText === "string" && r.rawText.length > 0) {
+        const truncated =
+          r.rawText.length > 16 * 1024
+            ? r.rawText.slice(0, 16 * 1024) + "\n… [truncated]"
+            : r.rawText;
+        trace.push(
+          JSON.stringify({
+            kind: "assistant",
+            at: new Date().toISOString(),
+            content: [{ type: "text", text: truncated }],
+          }),
+        );
+      }
+      if (typeof r.costUsd === "number") costUsd = r.costUsd;
+    }
+    trace.push(
+      JSON.stringify({
+        kind: "result",
+        at: new Date().toISOString(),
+        subtype: "success",
+        costUsd,
+      }),
+    );
     await prisma.jobRun.update({
       where: { id: job.id },
-      data: { ok: true, endedAt: new Date() },
+      data: {
+        ok: true,
+        endedAt: new Date(),
+        costUsd,
+        messagesJson: trace.join("\n") + "\n",
+      },
     });
     return { ok: true, out, jobId: job.id };
   } catch (e) {
     const err = e instanceof Error ? e.message : String(e);
     await prisma.jobRun.update({
       where: { id: job.id },
-      data: { ok: false, error: err.slice(0, 1000), endedAt: new Date() },
+      data: {
+        ok: false,
+        error: err.slice(0, 1000),
+        endedAt: new Date(),
+        messagesJson:
+          JSON.stringify({
+            kind: "result",
+            at: new Date().toISOString(),
+            subtype: "error_during_execution",
+            error: err,
+          }) + "\n",
+      },
     });
     return { ok: false, error: err, jobId: job.id };
   }
@@ -129,7 +190,7 @@ export async function callClaudeJson<T>(
  * both and walk the brace stack to pull just the object. As a last resort we
  * re-escape raw control characters inside quoted strings.
  */
-function extractJson<T>(raw: string): T {
+export function extractJson<T>(raw: string): T {
   const cleaned = raw
     .trim()
     .replace(/^```json\s*/i, "")
@@ -173,13 +234,22 @@ function extractJson<T>(raw: string): T {
     }
   }
 
+  // If the walk hit EOF with open braces still on the stack, the model
+  // almost certainly got cut off by the output-token limit. Try to
+  // recover: walk back to the last complete-looking element, auto-close
+  // the remaining braces/brackets, and parse that. Prefer recovery over
+  // losing the whole payload.
+  let recovered: string | null = null;
   if (end === -1) {
-    throw new Error(
-      `unterminated JSON object — first 200 chars: ${cleaned.slice(start, start + 200)}`,
-    );
+    recovered = recoverTruncatedJson(cleaned, start, depth, inString);
+    if (!recovered) {
+      throw new Error(
+        `unterminated JSON object — first 200 chars: ${cleaned.slice(start, start + 200)}`,
+      );
+    }
   }
 
-  const slice = cleaned.slice(start, end + 1);
+  const slice = recovered ?? cleaned.slice(start, end + 1);
   try {
     return JSON.parse(slice) as T;
   } catch (firstErr) {
@@ -192,6 +262,103 @@ function extractJson<T>(raw: string): T {
       );
     }
   }
+}
+
+/**
+ * Best-effort reconstruction of a JSON object that was cut off mid-stream
+ * by an output-token limit. Strategy: trim any partially-written key or
+ * value from the tail, close any open string, then append the right
+ * number of `]` / `}` to balance the stack. Returns null if we can't find
+ * any reasonable trim point.
+ *
+ * Not a general JSON fixer — scoped to the specific failure mode where
+ * the LLM's tail looks like "...", "rationale": "...truncated-string".
+ */
+function recoverTruncatedJson(
+  cleaned: string,
+  start: number,
+  _depth: number,
+  _inString: boolean,
+): string | null {
+  // Re-walk carrying the stack of open brackets. Track the position of
+  // the last full top-level element so we can truncate there if needed.
+  const stack: Array<"{" | "["> = [];
+  let inStr = false;
+  let esc = false;
+  let i = start;
+  let lastSafeClose = -1; // position of the most recent well-balanced closer
+  for (; i < cleaned.length; i++) {
+    const c = cleaned[i]!;
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{" || c === "[") stack.push(c as "{" | "[");
+    else if (c === "}" || c === "]") {
+      stack.pop();
+      if (stack.length === 1) lastSafeClose = i;
+    }
+  }
+
+  // Truncate to end-of-string: if we're mid-string, back up to the last
+  // quote mark we had crossed (so we don't leave a dangling backslash).
+  let trimEnd = cleaned.length;
+  if (inStr) {
+    // find position of last unescaped quote before EOF — simpler: just
+    // close the string manually by appending `"`.
+  }
+
+  // Strip any trailing fragment after the last comma at the top level.
+  // Common shape at truncation: `"rationale": "blah bl` — we want to
+  // discard the partial key/value and close the object.
+  let tail = cleaned.slice(start, trimEnd);
+
+  // If there's an unterminated string, close it.
+  let tmpInStr = false;
+  let tmpEsc = false;
+  for (let j = 0; j < tail.length; j++) {
+    const c = tail[j]!;
+    if (tmpEsc) { tmpEsc = false; continue; }
+    if (c === "\\") { tmpEsc = true; continue; }
+    if (c === '"') tmpInStr = !tmpInStr;
+  }
+  if (tmpInStr) tail += '"';
+
+  // Drop trailing comma if present.
+  tail = tail.replace(/,\s*$/, "");
+  // Drop trailing `"someKey":` with no value.
+  tail = tail.replace(/,\s*"[^"]*"\s*:\s*$/, "");
+
+  // Close remaining open brackets/braces in reverse.
+  while (stack.length > 0) {
+    const open = stack.pop()!;
+    tail += open === "{" ? "}" : "]";
+  }
+
+  // Sanity: if we made zero changes and the brace count still doesn't
+  // balance, bail. Otherwise return the best-effort slice.
+  let opens = 0;
+  let closes = 0;
+  let s2 = false;
+  let e2 = false;
+  for (let j = 0; j < tail.length; j++) {
+    const c = tail[j]!;
+    if (e2) { e2 = false; continue; }
+    if (c === "\\") { e2 = true; continue; }
+    if (c === '"') { s2 = !s2; continue; }
+    if (s2) continue;
+    if (c === "{" || c === "[") opens++;
+    else if (c === "}" || c === "]") closes++;
+  }
+  if (opens !== closes) {
+    // Fallback: if the balance is still wrong, try harder by truncating
+    // to the last safe close and wrapping.
+    if (lastSafeClose > 0) {
+      return cleaned.slice(start, lastSafeClose + 1) + "}";
+    }
+    return null;
+  }
+  return tail;
 }
 
 function escapeControlCharsInStrings(s: string): string {
@@ -238,14 +405,40 @@ let cachedClaudePath: string | null | undefined;
 async function resolveClaudePath(): Promise<string | null> {
   if (cachedClaudePath !== undefined) return cachedClaudePath;
   const { spawn } = await import("node:child_process");
-  const out: string = await new Promise((resolve) => {
+  const { access, constants } = await import("node:fs/promises");
+
+  // First: `which claude` — honours whatever PATH the process has.
+  const whichOut: string = await new Promise((resolve) => {
     const proc = spawn("which", ["claude"], { timeout: 2000 });
     let buf = "";
     proc.stdout.on("data", (d) => (buf += d));
     proc.on("error", () => resolve(""));
     proc.on("close", () => resolve(buf.trim()));
   });
-  cachedClaudePath = out || null;
+  if (whichOut) {
+    cachedClaudePath = whichOut;
+    return cachedClaudePath;
+  }
+
+  // Fallback: probe well-known install locations when PATH is thin
+  // (the in-process worker and HMR dev servers often don't inherit
+  // ~/.local/bin from the user's interactive shell).
+  const home = process.env.HOME ?? "";
+  const candidates = [
+    home ? `${home}/.local/bin/claude` : "",
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+  ].filter(Boolean);
+  for (const c of candidates) {
+    try {
+      await access(c, constants.X_OK);
+      cachedClaudePath = c;
+      return cachedClaudePath;
+    } catch {
+      // try next
+    }
+  }
+  cachedClaudePath = null;
   return cachedClaudePath;
 }
 

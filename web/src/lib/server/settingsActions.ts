@@ -13,6 +13,9 @@ const FILE_MAP: Record<PromptKind, string> = {
   paper_skeleton: "skeleton.md",
   section_polish: "polish.md",
   outer_loop_audit: "outer-loop-audit.md",
+  repo_quickstart: "repo-quickstart.md",
+  literature_review: "literature-review.md",
+  project_brain: "project-brain.md",
 };
 
 export async function upsertPromptTemplate(kind: PromptKind, formData: FormData) {

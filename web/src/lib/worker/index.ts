@@ -175,3 +175,65 @@ export async function runJobOnce(kind: JobKind): Promise<void> {
   if (!t) throw new Error(`unknown job: ${kind}`);
   await runTick(t);
 }
+
+/* ---------------- long-running agent job dispatch --------------- */
+
+/**
+ * In-memory registry of in-flight agent sessions keyed by JobRun.id.
+ * /api/jobs/[id]/abort looks up the controller here and calls .abort()
+ * so the Claude Agent SDK session winds down at its next safe point.
+ * Registered automatically by `kickOffAgentJob`.
+ */
+const agentAborts: Map<string, AbortController> = (() => {
+  const g = globalThis as unknown as {
+    __sd_agent_aborts?: Map<string, AbortController>;
+  };
+  if (!g.__sd_agent_aborts) g.__sd_agent_aborts = new Map();
+  return g.__sd_agent_aborts;
+})();
+
+export function getAgentAbort(jobId: string): AbortController | undefined {
+  return agentAborts.get(jobId);
+}
+
+/**
+ * Fire-and-forget dispatch for long-running agent tasks (repo quickstart,
+ * anything else that streams). Not under `withMutex` — quickstart jobs
+ * for different projects should run in parallel.
+ *
+ * The task closure receives the controller so it can pass its signal
+ * down to the SDK. Errors inside the task are caught, logged on the
+ * JobRun row, and don't unhandle-reject.
+ */
+export function kickOffAgentJob(
+  jobId: string,
+  task: (ctrl: AbortController) => Promise<void>,
+): AbortController {
+  const ctrl = new AbortController();
+  agentAborts.set(jobId, ctrl);
+
+  // Defer with queueMicrotask so the caller can return a response first.
+  queueMicrotask(() => {
+    task(ctrl)
+      .catch(async (e) => {
+        try {
+          await prisma.jobRun.update({
+            where: { id: jobId },
+            data: {
+              ok: false,
+              error: (e instanceof Error ? e.message : String(e)).slice(0, 1000),
+              endedAt: new Date(),
+            },
+          });
+        } catch {
+          // DB may already be in an unexpected state; worst-case leave the
+          // JobRun open and the user can read the error from elsewhere.
+        }
+      })
+      .finally(() => {
+        agentAborts.delete(jobId);
+      });
+  });
+
+  return ctrl;
+}

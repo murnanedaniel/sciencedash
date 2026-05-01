@@ -51,3 +51,4 @@ next-env.d.ts
 /src/generated/
 dev.db
 dev.db-journal
+dev.db.bak.*

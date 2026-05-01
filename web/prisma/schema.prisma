@@ -115,6 +115,9 @@ enum JobKind {
   ai_skeleton
   ai_audit
   arxiv_fetch
+  repo_quickstart
+  literature_review
+  project_brain
   other
 }
 
@@ -123,6 +126,26 @@ enum PromptKind {
   paper_skeleton
   section_polish
   outer_loop_audit
+  repo_quickstart
+  literature_review
+  project_brain
+}
+
+enum AgentMessageSeverity {
+  info
+  suggestion
+  decision
+  blocker
+}
+
+enum AgentMessageKind {
+  note
+  alert
+  status
+  digest
+  /// Command from the dashboard to a workhorse (e.g. revive_session).
+  /// Body is short; payloadJson holds the structured directive.
+  directive
 }
 
 model Project {
@@ -145,6 +168,38 @@ model Project {
 
   aiAutoReviewEnabled Boolean       @default(false)
 
+  /// Absolute path to the project's local repo on the user's machine.
+  /// Used by the "chat with project" button to spawn a tmux Claude
+  /// pointed at the right cwd, and by the project brain to mirror its
+  /// memory files (Phase F).
+  localPath           String?
+
+  /// Project brain — Tier-2 rolling memory log (≤2K chars, FIFO key
+  /// results + 15-entry decision window). Maintained by runHeartbeat;
+  /// rendered in the dashboard's Plan tab; mirrored to
+  /// <localPath>/.sciencedash/MEMORY_LOG.md if localPath is set.
+  brainMemoryLog        String?
+  /// Last project-brain cycle. Used for anti-burn (skip if too recent)
+  /// and for the dashboard's "last reviewed" UI.
+  brainLastHeartbeatAt  DateTime?
+
+  /// User-authored directive consumed by the next brain heartbeat.
+  /// Set via the Plan tab's directive editor; cleared (with timestamp
+  /// recorded below) when the brain consumes it. Also mirrored to
+  /// <localPath>/.sciencedash/HUMAN_DIRECTIVE.md when localPath is set.
+  brainDirective              String?
+  /// When the user last set a directive.
+  brainDirectiveSetAt         DateTime?
+  /// When a heartbeat last consumed a directive (cleared brainDirective).
+  brainDirectiveConsumedAt    DateTime?
+
+  /// Autonomy spectrum config (JSON). Brain dispatch tools consult this
+  /// before firing. Shape:
+  ///   { auto: ["restart_run", ...], propose: [...], ask: [...],
+  ///     spendCapGpuH: 100, spendCapTokensUsd: 1.0 }
+  /// Anything not listed defaults to "ask" — conservative.
+  autonomyJson          String?
+
   tags                Tag[]         @relation("ProjectTags")
 
   hypotheses          Hypothesis[]
@@ -156,6 +211,8 @@ model Project {
   notes               NoteProject[]
   wandbSources        WandbSource[]
   repoLinks           RepoLink[]
+  agentMessages       AgentMessage[]
+  workhorses          Workhorse[]
 }
 
 model WandbSource {
@@ -374,11 +431,14 @@ model NoteProject {
 model JobRun {
   id           String    @id @default(cuid())
   kind         JobKind
+  title        String?
   startedAt    DateTime  @default(now())
   endedAt      DateTime?
   ok           Boolean?
   error        String?
   payloadJson  String?
+  messagesJson String?
+  costUsd      Float?
 
   projectId    String?
 }
@@ -403,6 +463,12 @@ model Decision {
   subjectId    String
   rationale    String?
 
+  /// Optional JSON array of evidence pointers, e.g.
+  /// [{ "type": "note", "id": "cmoii…" }, { "type": "checkIn", "id": "cmo…" }].
+  /// Lets the dashboard render decision provenance as clickable links
+  /// instead of having to parse references out of the rationale prose.
+  evidenceIdsJson  String?
+
   projectId    String?
   project      Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
@@ -412,10 +478,64 @@ model CheckIn {
   createdAt           DateTime  @default(now())
 
   scope               String
+  /// Shape of the check-in. Lets the digest agent render plan-adoption
+  /// vs routine-progress vs blocker-escalation differently. Free-form;
+  /// canonical values: routine | plan | blocker | retro | other.
+  kind                String    @default("routine")
   projectId           String?
   project             Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   bodyMd              String
   source              String    @default("manual")
   proposedPatchJson   String?
+}
+
+model Workhorse {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Hostname or stable workhorse identifier ("perlmutter", "vast-h100-3", etc.).
+  host            String
+  /// tmux session name on the host. Convention: `sd-<projectId-prefix>`.
+  sessionName     String
+
+  /// Last beat from the cron-driven sync daemon. Indicates `host_reachable`.
+  lastHeartbeat   DateTime?
+  /// Last beat from a Claude tool call. Indicates `claude_active`.
+  lastClaudeBeat  DateTime?
+
+  /// Workhorse-side config snapshot (JSON). Helpful for debugging.
+  configJson      String?
+
+  @@unique([host, sessionName])
+  @@index([host])
+  @@index([projectId])
+}
+
+model AgentMessage {
+  id            String                @id @default(cuid())
+  createdAt     DateTime              @default(now())
+
+  projectId     String
+  project       Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Origin identifier — convention: "project-brain", "global-brain",
+  // "workhorse-<host>:sd-<projectId>", "local-claude", "review-agent",
+  // "sync-agent". Free-form to support future sources without migrations.
+  source        String
+
+  kind          AgentMessageKind      @default(note)
+  severity      AgentMessageSeverity  @default(info)
+
+  body          String
+  /// Optional structured payload (e.g. action params for propose-acts).
+  payloadJson   String?
+
+  readAt        DateTime?
+
+  @@index([projectId, createdAt])
+  @@index([projectId, readAt])
 }

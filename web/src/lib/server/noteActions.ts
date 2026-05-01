@@ -45,6 +45,13 @@ export async function deleteNote(id: string) {
   revalidatePath("/reading");
 }
 
+/** Remove a Note ↔ Project link without deleting the note itself. */
+export async function unlinkNoteFromProject(noteId: string, projectId: string) {
+  await prisma.noteProject.deleteMany({ where: { noteId, projectId } });
+  revalidatePath("/reading");
+  revalidatePath(`/projects/${projectId}`);
+}
+
 export async function patchNoteField(
   id: string,
   field: string,

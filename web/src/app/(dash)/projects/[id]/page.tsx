@@ -25,10 +25,25 @@ import {
 } from "@/lib/server/projectActions";
 import { spawnPaperFromHypothesis } from "@/lib/server/paperActions";
 import { createCheckIn } from "@/lib/server/checkInActions";
+import { unlinkNoteFromProject } from "@/lib/server/noteActions";
+import {
+  markMessageReadAction,
+  markAllMessagesReadAction,
+  deleteMessageAction,
+} from "@/lib/server/agentMessageActions";
 import { RunAiReviewButton } from "@/components/RunAiReviewButton";
 import { ParetoScatter } from "@/components/ParetoScatter";
 import { TagChips } from "@/components/TagChips";
 import { StatusForm } from "@/components/StatusForm";
+import { QuickstartButton } from "@/components/QuickstartModal";
+import { LitReviewButton } from "@/components/LitReviewButton";
+import { WorkhorsesPanel } from "@/components/WorkhorsesPanel";
+import { ChatWithProjectButton } from "@/components/ChatWithProjectButton";
+import { BrainHeartbeatButton } from "@/components/BrainHeartbeatButton";
+import { CopyButton } from "@/components/CopyButton";
+import { Hint } from "@/components/Hint";
+import { HumanDirectiveEditor } from "@/components/HumanDirectiveEditor";
+import { AutonomyEditor } from "@/components/AutonomyEditor";
 import {
   ProjectStatus,
   NarrativeReadiness,
@@ -40,6 +55,23 @@ type Props = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
+/**
+ * Derive a `git clone <url> <target>` command for a RepoLink.
+ *
+ * Prefers SSH form (git@host:owner/repo.git) for github.com URLs because
+ * that's what most users have keys configured for; falls back to the
+ * original https URL otherwise. Target dir defaults to ~/Research/<slug>
+ * to match what auto-detectLocalPath walks.
+ */
+function buildCloneCommand(url: string): string {
+  const trimmed = url.replace(/\.git$/, "").replace(/\/$/, "");
+  const m = /^https?:\/\/github\.com\/(.+)$/i.exec(trimmed);
+  const sshUrl = m ? `git@github.com:${m[1]}.git` : `${trimmed}.git`;
+  const slugMatch = /([^/]+?)(?:\.git)?\/?$/.exec(trimmed);
+  const slug = slugMatch ? slugMatch[1] : "repo";
+  return `git clone ${sshUrl} ~/Research/${slug}`;
+}
+
 function asString(v: string | string[] | undefined): string {
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
 }
@@ -49,7 +81,7 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
   const sp = (await searchParams) ?? {};
   const tab = asString(sp.tab) || "overview";
 
-  const project = await prisma.project.findUnique({
+  const projectRow = await prisma.project.findUnique({
     where: { id },
     include: {
       tags: true,
@@ -68,7 +100,11 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
       decisions: { orderBy: { at: "desc" }, take: 20 },
     },
   });
-  if (!project) notFound();
+  if (!projectRow) notFound();
+  const unreadMessageCount = await prisma.agentMessage.count({
+    where: { projectId: projectRow.id, readAt: null },
+  });
+  const project = { ...projectRow, unreadMessageCount };
 
   const spentByHyp = new Map<string, number>();
   for (const h of project.hypotheses) {
@@ -151,6 +187,33 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
           </span>
         </Link>
         <Link
+          href={`/projects/${project.id}?tab=literature`}
+          className={`tab ${tab === "literature" ? "tabActive" : ""}`}
+        >
+          Literature
+        </Link>
+        <Link
+          href={`/projects/${project.id}?tab=plan`}
+          className={`tab ${tab === "plan" ? "tabActive" : ""}`}
+        >
+          Plan
+          {project.brainLastHeartbeatAt ? (
+            <span className="muted" style={{ fontSize: 11 }}> · 🧠</span>
+          ) : null}
+        </Link>
+        <Link
+          href={`/projects/${project.id}?tab=feed`}
+          className={`tab ${tab === "feed" ? "tabActive" : ""}`}
+        >
+          Feed
+          {project.unreadMessageCount > 0 ? (
+            <span className="muted" style={{ fontSize: 11 }}>
+              {" "}
+              · {project.unreadMessageCount}
+            </span>
+          ) : null}
+        </Link>
+        <Link
           href={`/projects/${project.id}?tab=activity`}
           className={`tab ${tab === "activity" ? "tabActive" : ""}`}
         >
@@ -231,7 +294,14 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
             </div>
 
             <div className="card">
-              <h2 className="sectionTitle">GitHub repos</h2>
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <h2 className="sectionTitle">GitHub repos</h2>
+                <QuickstartButton
+                  projectId={project.id}
+                  projectTitle={project.title}
+                  defaultTemplate={process.env.SCIENCEDASH_REPO_TEMPLATE ?? ""}
+                />
+              </div>
               {project.repoLinks.length === 0 ? (
                 <p className="muted small">No repos linked.</p>
               ) : (
@@ -265,6 +335,12 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
                           </div>
                         ) : null}
                       </div>
+                      <CopyButton
+                        value={buildCloneCommand(r.url)}
+                        label="Copy clone"
+                        copiedLabel="copied ✓"
+                        title={`Copy: ${buildCloneCommand(r.url)}`}
+                      />
                       <form action={removeRepoLink.bind(null, r.id)}>
                         <button
                           type="submit"
@@ -300,6 +376,8 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
                 </button>
               </form>
             </div>
+
+            <WorkhorsesPanel projectId={project.id} />
 
             <div className="card">
               <h2 className="sectionTitle">W&amp;B projects</h2>
@@ -397,21 +475,71 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
             </div>
 
             <div className="card">
-              <h2 className="sectionTitle">AI critical review</h2>
-              <p className="muted small" style={{ marginBottom: 10 }}>
-                §16.6 — critical, not polite. Returns actionable patches you accept one-by-one.
-              </p>
-              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                <RunAiReviewButton projectId={project.id} />
-                <form action={toggleAiAutoReview.bind(null, project.id)}>
-                  <button className="button buttonSecondary" type="submit">
-                    {project.aiAutoReviewEnabled
-                      ? "Disable AI auto-review on stall"
-                      : "Enable AI auto-review on stall"}
-                  </button>
-                </form>
+              <h2 className="sectionTitle">AI actions</h2>
+              <div className="stack" style={{ gap: 14 }}>
+                <div>
+                  <div style={{ marginBottom: 6, fontSize: 13 }}>
+                    <Hint text="Open Claude Code in your terminal, pointed at the project's local repo with the ScienceDash MCP loaded. Native Claude beats any in-app harness; this is the lowest-friction way to use it.">
+                      <strong>Chat with project</strong>
+                    </Hint>
+                  </div>
+                  <ChatWithProjectButton
+                    projectId={project.id}
+                    localPath={project.localPath}
+                    hasRepoLinks={project.repoLinks.length > 0}
+                    dashboardUrl={process.env.SCIENCEDASH_BASE_URL ?? "http://localhost:3000"}
+                  />
+                </div>
+                <div>
+                  <div style={{ marginBottom: 6, fontSize: 13 }}>
+                    <Hint
+                      wide
+                      text="A stateless supervisor cycle. Reads project state via MCP, decides if anything is worth surfacing, posts terse decision-shaped messages to the feed, and updates a bounded rolling memory log. Default-silent. Two-tier memory pattern from Deep Researcher Agent (arXiv 2604.05854) — frozen brief + rolling log, ≤5K chars total. Cost ~$0.13 per cycle."
+                    >
+                      <strong>Brain heartbeat</strong>
+                    </Hint>
+                  </div>
+                  <BrainHeartbeatButton
+                    projectId={project.id}
+                    lastHeartbeatAt={
+                      project.brainLastHeartbeatAt
+                        ? project.brainLastHeartbeatAt.toISOString()
+                        : null
+                    }
+                  />
+                </div>
+                <div>
+                  <div style={{ marginBottom: 6, fontSize: 13 }}>
+                    <Hint text="§16.6 critical review. Multi-turn agent that reads runs, decisions, notes via MCP, then returns a structured rubric with evidence-grounded findings and proposedPatches you accept one-by-one. Cost ~$0.20 per run.">
+                      <strong>Critical review</strong>
+                    </Hint>
+                  </div>
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <RunAiReviewButton projectId={project.id} />
+                    <form action={toggleAiAutoReview.bind(null, project.id)}>
+                      <button className="button buttonSecondary" type="submit">
+                        {project.aiAutoReviewEnabled
+                          ? "Disable auto-review on stall"
+                          : "Enable auto-review on stall"}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ marginBottom: 6, fontSize: 13 }}>
+                    <Hint
+                      wide
+                      text="Proposes a starter reading list sized to what's actually load-bearing for this project. Verified against arXiv; unverified citations are kept but flagged. Backfills existing unverified notes when arXiv IDs become resolvable. Cost ~$0.10–1.20 depending on search depth."
+                    >
+                      <strong>Literature review</strong>
+                    </Hint>
+                  </div>
+                  <LitReviewButton projectId={project.id} />
+                </div>
               </div>
             </div>
+
+            <AutonomyEditor projectId={project.id} autonomyJson={project.autonomyJson} />
 
             <div className="card danger">
               <h2 className="sectionTitle">Danger zone</h2>
@@ -456,9 +584,289 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
         </div>
       ) : tab === "runs" ? (
         <RunsTab project={project} spentByHyp={spentByHyp} />
+      ) : tab === "literature" ? (
+        <LiteratureTab projectId={project.id} />
+      ) : tab === "feed" ? (
+        <FeedTab projectId={project.id} />
+      ) : tab === "plan" ? (
+        <PlanTab projectId={project.id} />
       ) : (
         <ActivityTab projectId={project.id} />
       )}
+    </div>
+  );
+}
+
+async function LiteratureTab({ projectId }: { projectId: string }) {
+  const rows = await prisma.noteProject.findMany({
+    where: { projectId },
+    include: { note: true },
+    orderBy: { note: { createdAt: "desc" } },
+  });
+  if (rows.length === 0) {
+    return (
+      <div className="card muted">
+        No notes linked to this project yet. Try the{" "}
+        <strong>Literature review</strong> button on the Overview tab, or add
+        notes manually from <Link className="link" href="/reading">Reading</Link>.
+      </div>
+    );
+  }
+  return (
+    <div className="stack">
+      {rows.map((row: AnyDef) => {
+        const n = row.note;
+        const unverified =
+          typeof n.takeaway === "string" && n.takeaway.startsWith("[unverified citation]");
+        return (
+          <div key={n.id} className="card">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 17, letterSpacing: "-0.01em" }}>
+                  <a
+                    href={
+                      n.url ??
+                      `https://arxiv.org/search/?searchtype=all&query=${encodeURIComponent(n.title)}`
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                    className="litTitle"
+                    title={
+                      n.url
+                        ? `Open ${n.url}`
+                        : "Search arXiv for this title (no direct URL stored)"
+                    }
+                  >
+                    {n.title} <span className="litTitleArrow">↗</span>
+                  </a>
+                </div>
+                <div className="rowWrap" style={{ marginTop: 4 }}>
+                  <span className="pill">{n.kind}</span>
+                  {n.arxivId ? (
+                    <a className="pill link" href={`https://arxiv.org/abs/${n.arxivId}`} target="_blank" rel="noreferrer">
+                      arXiv:{n.arxivId}
+                    </a>
+                  ) : unverified ? (
+                    <span className="pill" style={{ color: "var(--accent2)" }}>unverified</span>
+                  ) : null}
+                  {n.arxivId ? (
+                    <a
+                      className="pill link"
+                      href={`https://arxiv.org/pdf/${n.arxivId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      pdf
+                    </a>
+                  ) : null}
+                  {n.url && !n.arxivId ? (
+                    <a className="pill link" href={n.url} target="_blank" rel="noreferrer">link</a>
+                  ) : null}
+                  <span className="muted small">{daysAgoLabel(n.createdAt)}</span>
+                </div>
+                {n.authors ? (
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {n.authors}
+                  </div>
+                ) : null}
+                {n.takeaway ? (
+                  <p style={{ marginTop: 8, fontSize: 14 }}>{n.takeaway}</p>
+                ) : null}
+                {n.summaryMd ? (
+                  <p className="muted small" style={{ marginTop: 6 }}>{n.summaryMd}</p>
+                ) : null}
+              </div>
+              <form action={unlinkNoteFromProject.bind(null, row.noteId, projectId)}>
+                <button type="submit" className="button buttonSecondary" style={{ padding: "4px 8px", fontSize: 12 }}>
+                  Unlink
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+async function PlanTab({ projectId }: { projectId: string }) {
+  const { assembleBrief, loadMemoryLog, readHumanDirective } = await import(
+    "@/lib/brain/memory"
+  );
+  const [brief, memoryLog, project, resolvedDirective] = await Promise.all([
+    assembleBrief(projectId),
+    loadMemoryLog(projectId),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        localPath: true,
+        brainDirective: true,
+        brainDirectiveSetAt: true,
+        brainDirectiveConsumedAt: true,
+      },
+    }),
+    readHumanDirective(projectId),
+  ]);
+  if (!project) notFound();
+  // resolvedDirective covers DB+file fallback; prefer DB if set so the
+  // editor knows the directive is actually pending vs just-on-disk.
+  const editorDirective = project.brainDirective ?? resolvedDirective ?? null;
+  return (
+    <div className="stack">
+      <HumanDirectiveEditor
+        projectId={projectId}
+        brainDirective={editorDirective}
+        directiveIsFromFile={!project.brainDirective && !!resolvedDirective}
+        brainDirectiveSetAt={project.brainDirectiveSetAt}
+        brainDirectiveConsumedAt={project.brainDirectiveConsumedAt}
+        hasLocalPath={!!project.localPath}
+      />
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>
+          Tier 1 — PROJECT_BRIEF{" "}
+          <span className="muted small">(frozen, derived from DB)</span>
+        </h3>
+        <pre
+          style={{
+            whiteSpace: "pre-wrap",
+            fontSize: 13,
+            margin: 0,
+            fontFamily: "var(--font-display, system-ui)",
+          }}
+        >
+          {brief}
+        </pre>
+      </div>
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>
+          Tier 2 — MEMORY_LOG{" "}
+          <span className="muted small">
+            (rolling, brain-maintained · {memoryLog.length}/2000 chars)
+          </span>
+        </h3>
+        {memoryLog ? (
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: 13,
+              margin: 0,
+              fontFamily: "var(--font-display, system-ui)",
+            }}
+          >
+            {memoryLog}
+          </pre>
+        ) : (
+          <p className="muted small" style={{ margin: 0 }}>
+            No brain heartbeat has run yet. Trigger one from the Overview tab.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+async function FeedTab({ projectId }: { projectId: string }) {
+  const messages = await prisma.agentMessage.findMany({
+    where: { projectId },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  if (messages.length === 0) {
+    return (
+      <div className="card muted">
+        <p style={{ margin: 0 }}>
+          No agent messages on this project yet. The feed surfaces what brains and
+          workhorses have to say — observations, suggestions, decisions, blockers.
+        </p>
+        <p className="small" style={{ marginTop: 8, marginBottom: 0 }}>
+          Agents post here via the MCP <code>post_message</code> tool.
+        </p>
+      </div>
+    );
+  }
+
+  const unreadCount = messages.filter((m) => m.readAt === null).length;
+
+  return (
+    <div className="stack">
+      {unreadCount > 0 ? (
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <form action={markAllMessagesReadAction}>
+            <input type="hidden" name="projectId" value={projectId} />
+            <button type="submit" className="button buttonSecondary">
+              Mark all read ({unreadCount})
+            </button>
+          </form>
+        </div>
+      ) : null}
+      {messages.map((m) => {
+        const isUnread = m.readAt === null;
+        const sevColor =
+          m.severity === "blocker"
+            ? "var(--red, #c0322a)"
+            : m.severity === "decision"
+              ? "var(--accent, #6a4cd6)"
+              : m.severity === "suggestion"
+                ? "var(--accent2, #b08a3a)"
+                : "var(--muted, #888)";
+        return (
+          <div
+            key={m.id}
+            className="card"
+            style={{
+              borderLeft: `3px solid ${sevColor}`,
+              opacity: isUnread ? 1 : 0.72,
+            }}
+          >
+            <div className="rowWrap" style={{ alignItems: "center", gap: 8 }}>
+              <span
+                className="pill"
+                style={{ background: sevColor, color: "#fff" }}
+                title={`severity: ${m.severity}`}
+              >
+                {m.severity}
+              </span>
+              <span className="pill pillMuted" title={`kind: ${m.kind}`}>
+                {m.kind}
+              </span>
+              <span className="muted small" title={`source: ${m.source}`}>
+                {m.source}
+              </span>
+              <span className="muted small">·</span>
+              <span className="muted small">{daysAgoLabel(m.createdAt)}</span>
+              {isUnread ? (
+                <span className="pill" style={{ marginLeft: "auto" }}>unread</span>
+              ) : null}
+            </div>
+            <div style={{ marginTop: 8, whiteSpace: "pre-wrap", fontSize: 14 }}>
+              {m.body}
+            </div>
+            {m.payloadJson ? (
+              <details style={{ marginTop: 8 }}>
+                <summary className="muted small">payload</summary>
+                <pre style={{ fontSize: 12, marginTop: 4 }}>{m.payloadJson}</pre>
+              </details>
+            ) : null}
+            <div className="row" style={{ marginTop: 8, gap: 6, justifyContent: "flex-end" }}>
+              {isUnread ? (
+                <form action={markMessageReadAction}>
+                  <input type="hidden" name="id" value={m.id} />
+                  <button type="submit" className="button buttonSecondary small">
+                    Mark read
+                  </button>
+                </form>
+              ) : null}
+              <form action={deleteMessageAction}>
+                <input type="hidden" name="id" value={m.id} />
+                <button type="submit" className="button buttonSecondary small">
+                  Delete
+                </button>
+              </form>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

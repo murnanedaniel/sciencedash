@@ -1,3 +1,9 @@
 
 # local dev helpers (seed scripts, scratch)
 /web/seed-from-seedmd.mjs
+
+# python bytecode (workhorse-bootstrap is invoked as a script, no install)
+__pycache__/
+
+# stray sqlite at repo root (the real one lives at web/dev.db)
+/dev.db

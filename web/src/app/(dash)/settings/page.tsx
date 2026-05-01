@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { formatUtc, daysAgoLabel } from "@/lib/format";
 import { RunJobButton } from "@/components/RunJobButton";
+import { CopyButton } from "@/components/CopyButton";
 import {
   upsertPromptTemplate,
   resetPromptTemplate,
@@ -16,6 +17,9 @@ const PROMPT_LABELS: Record<PromptKind, string> = {
   paper_skeleton: "Paper skeleton",
   section_polish: "Section polish",
   outer_loop_audit: "Outer-loop audit",
+  repo_quickstart: "Repo quickstart",
+  literature_review: "Literature review",
+  project_brain: "Project brain",
 };
 
 export default async function SettingsPage() {
@@ -43,6 +47,9 @@ export default async function SettingsPage() {
     paper_skeleton: await loadDefaultPrompt("paper_skeleton"),
     section_polish: await loadDefaultPrompt("section_polish"),
     outer_loop_audit: await loadDefaultPrompt("outer_loop_audit"),
+    repo_quickstart: await loadDefaultPrompt("repo_quickstart"),
+    literature_review: await loadDefaultPrompt("literature_review"),
+    project_brain: await loadDefaultPrompt("project_brain"),
   };
 
   const projects = await prisma.project.findMany({
@@ -107,6 +114,59 @@ export default async function SettingsPage() {
           </p>
         </div>
 
+        {/* Cluster integration */}
+        <div className="card">
+          <h2 className="sectionTitle">Cluster Claude integration</h2>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Hook a long-running Claude Code session on a remote host (Perlmutter, Vast, …) into ScienceDash via the workhorse sync protocol.
+          </p>
+          <ol className="stack small" style={{ paddingLeft: 18, gap: 10 }}>
+            <li>
+              <div>
+                <strong>One-time:</strong> install <code>cloudflared</code> on the laptop (Linux/WSL2):
+              </div>
+              <ClusterCmd cmd="curl -L --output /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && sudo dpkg -i /tmp/cloudflared.deb" />
+            </li>
+            <li>
+              <div>
+                Open a fresh laptop terminal and start a quick-tunnel — keep it running for the whole work session:
+              </div>
+              <ClusterCmd cmd="cloudflared tunnel --url http://localhost:3000" />
+              <div className="muted small" style={{ marginTop: 4 }}>
+                Copy the printed <code>https://*.trycloudflare.com</code> URL — that&apos;s your dashboard URL for the cluster side.
+              </div>
+            </li>
+            <li>
+              <div>SSH into the cluster:</div>
+              <ClusterCmd cmd="ssh user@host" />
+            </li>
+            <li>
+              <div>Copy the bootstrap files to the cluster:</div>
+              <ClusterCmd cmd="scp tools/workhorse-bootstrap/sync.py tools/workhorse-bootstrap/setup.sh user@host:~/.sciencedash-bootstrap/" />
+            </li>
+            <li>
+              <div>Run the bootstrap on the cluster (paste the cloudflared URL):</div>
+              <ClusterCmd cmd="DASHBOARD=https://<your-cloudflared-url> HOST=<host> bash ~/.sciencedash-bootstrap/setup.sh" />
+            </li>
+            <li>
+              Edit <code>~/.sciencedash/config.json</code> to register projects (set <code>dashboard_url</code> to the same cloudflared URL), then re-run setup.sh (it&apos;s idempotent and generates per-project MCP configs).
+            </li>
+            <li>
+              <div>Start the Claude session inside tmux:</div>
+              <ClusterCmd cmd="tmux new -As sd-<projectId> &quot;cd <repo> && claude --mcp-config ~/.sciencedash/<projectId>/mcp-config.json&quot;" />
+            </li>
+            <li>
+              <div>Re-attach later (optional):</div>
+              <ClusterCmd cmd="tmux attach -t sd-<projectId>" />
+            </li>
+          </ol>
+          <p className="muted small" style={{ marginTop: 8 }}>
+            Full guide: <Link className="link" href="/docs/setup">/docs/setup</Link>{" "}
+            (cloudflared + SSH-tunnel alternative). Wire protocol:{" "}
+            <code>docs/workhorse-protocol.md</code>.
+          </p>
+        </div>
+
         {/* Worker */}
         <div className="card">
           <h2 className="sectionTitle">Background worker</h2>
@@ -133,6 +193,7 @@ export default async function SettingsPage() {
                 <th>Started</th>
                 <th>Status</th>
                 <th>Payload / error</th>
+                <th>Trace</th>
               </tr>
             </thead>
             <tbody>
@@ -147,6 +208,9 @@ export default async function SettingsPage() {
                     </td>
                     <td style={{ fontSize: 11 }}>
                       {j.error ? j.error : j.payloadJson ?? ""}
+                    </td>
+                    <td>
+                      <Link className="link small" href={`/jobs/${j.id}`}>view →</Link>
                     </td>
                   </tr>
                 ))}
@@ -226,25 +290,34 @@ export default async function SettingsPage() {
         {/* Recent jobs */}
         <div className="card">
           <h2 className="sectionTitle">Recent jobs</h2>
+          <p className="muted small" style={{ marginBottom: 10 }}>
+            Click <em>view</em> on any row to see the Claude session&apos;s live trace (assistant messages, tool calls, tool results).
+          </p>
           <table className="metricTable">
             <thead>
               <tr>
                 <th>Kind</th>
+                <th>Title</th>
                 <th>Started</th>
                 <th>Ended</th>
                 <th>Status</th>
-                <th>Payload / error</th>
+                <th className="num">Cost</th>
+                <th>Trace</th>
               </tr>
             </thead>
             <tbody>
               {jobs.slice(0, 30).map((j) => (
                 <tr key={j.id}>
                   <td>{j.kind}</td>
+                  <td style={{ fontSize: 12 }}>{j.title ?? ""}</td>
                   <td>{formatUtc(j.startedAt)}</td>
                   <td>{j.endedAt ? formatUtc(j.endedAt) : "—"}</td>
                   <td>{j.ok === true ? "✓" : j.ok === false ? "✗" : "queued"}</td>
-                  <td style={{ fontSize: 11 }}>
-                    {j.error ? j.error : j.payloadJson ?? ""}
+                  <td className="num">
+                    {typeof j.costUsd === "number" ? `$${j.costUsd.toFixed(3)}` : "—"}
+                  </td>
+                  <td>
+                    <Link className="link small" href={`/jobs/${j.id}`}>view →</Link>
                   </td>
                 </tr>
               ))}
@@ -252,6 +325,24 @@ export default async function SettingsPage() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A code-block row with a sticky Copy button — used in the cluster recipe. */
+function ClusterCmd({ cmd }: { cmd: string }) {
+  return (
+    <div
+      className="row"
+      style={{
+        marginTop: 4,
+        gap: 6,
+        alignItems: "center",
+        flexWrap: "wrap",
+      }}
+    >
+      <code style={{ flex: "1 1 auto", minWidth: 0, fontSize: 12 }}>{cmd}</code>
+      <CopyButton value={cmd} label="Copy" />
     </div>
   );
 }
