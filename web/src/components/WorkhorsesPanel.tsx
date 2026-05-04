@@ -8,7 +8,10 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { reviveWorkhorseAction } from "@/lib/server/agentMessageActions";
+import {
+  reviveWorkhorseAction,
+  tickWorkhorseAction,
+} from "@/lib/server/agentMessageActions";
 import { CopyButton } from "@/components/CopyButton";
 
 const HOST_STALE_MS = 3 * 60_000;
@@ -194,6 +197,26 @@ export async function WorkhorsesPanel({ projectId }: { projectId: string }) {
                     }
                   >
                     {state === "dead" || state === "unreachable" ? "Revive" : "Restart"}
+                  </button>
+                </form>
+                {/* Tick: queue workhorse_tick directive — sync.py
+                    tmux-send-keys's a "take one concrete next step"
+                    prompt into the Claude REPL. Disabled when session
+                    isn't alive (nothing to send keys to). */}
+                <form action={tickWorkhorseAction}>
+                  <input type="hidden" name="workhorseId" value={w.id} />
+                  <button
+                    type="submit"
+                    className="button buttonSecondary small"
+                    style={{ padding: "2px 8px", fontSize: 11 }}
+                    disabled={state === "dead" || state === "unreachable"}
+                    title={
+                      state === "dead" || state === "unreachable"
+                        ? "Workhorse session isn't alive — Revive first, then Tick."
+                        : "Queue workhorse_tick — sync.py injects a 'take one concrete next step' prompt into the Claude REPL within ~60s."
+                    }
+                  >
+                    Tick
                   </button>
                 </form>
               </div>

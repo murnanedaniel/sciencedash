@@ -19,12 +19,14 @@ import { tmpdir } from "node:os";
 import { prisma } from "@/lib/prisma";
 import {
   callClaudeAgent,
-  canUseToolForReview,
+  canUseToolForBrainHeartbeat,
 } from "@/lib/ai/agentClient";
 import { extractJson } from "@/lib/ai/client";
 import { assembleMemory, saveMemoryLog } from "@/lib/brain/memory";
 
 const MIN_INTERVAL_MS = 5 * 60_000;
+
+export type HeartbeatMode = "auto" | "propose";
 
 export type HeartbeatResult =
   | {
@@ -34,14 +36,16 @@ export type HeartbeatResult =
       memoryLogChars: number;
       messagesPosted: number;
       costUsd: number | null;
+      mode: HeartbeatMode;
     }
   | { ok: true; skipped: true; reason: string }
   | { ok: false; jobId?: string; error: string };
 
 export async function runHeartbeat(
   projectId: string,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; mode?: HeartbeatMode } = {},
 ): Promise<HeartbeatResult> {
+  const mode: HeartbeatMode = opts.mode ?? "auto";
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: { id: true, title: true, brainLastHeartbeatAt: true },
@@ -99,7 +103,7 @@ export async function runHeartbeat(
     userContent,
     cwd: tmpdir(),
     allowedTools: ["WebSearch", "WebFetch"],
-    canUseTool: canUseToolForReview(["arxiv.org"]),
+    canUseTool: canUseToolForBrainHeartbeat(mode, ["arxiv.org"]),
     mcpServers: {
       sciencedash: { type: "http", url: `${dashboardUrl.replace(/\/$/, "")}/api/mcp` },
     },
@@ -140,6 +144,7 @@ export async function runHeartbeat(
     memoryLogChars: compacted.length,
     messagesPosted,
     costUsd: agent.costUsd,
+    mode,
   };
 }
 

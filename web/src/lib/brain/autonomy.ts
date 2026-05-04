@@ -54,6 +54,33 @@ export const KNOWN_ACTION_CLASSES: Array<{
     description: "Mark a hypothesis as paused/abandoned (records a Decision row).",
     riskLevel: "high",
   },
+  // Brain/tick gating uses the same three-bucket vocabulary but with
+  // bucket-specific semantics decoded by the worker, NOT by decideAutonomy
+  // alone. See web/src/lib/worker/index.ts:runBrainTick for the canonical
+  // interpretation:
+  //   auto    — heartbeat fires hourly, full MCP write surface allowed.
+  //   propose — heartbeat fires hourly, message-level writes only
+  //             (post_message, add_note, create_check_in). Field-level
+  //             writes (update_project_fields, record_decision) are denied.
+  //   ask     — heartbeat does NOT fire; a placeholder JobRun is queued so
+  //             the user can one-click execute from /today.
+  {
+    name: "brain_heartbeat",
+    description:
+      "Run the project brain on a schedule. ask=manual click only, propose=post messages/notes/check-ins, auto=full write surface.",
+    riskLevel: "medium",
+  },
+  // Workhorse tick (Part 2). sync.py reads workhorse_tick directives and
+  // injects a prompt into the workhorse Claude via tmux send-keys when
+  // the session is idle. auto=scheduler queues directives every 30 min;
+  // propose=identical to auto for now (retained for future "post a heads-
+  // up before nudging" UX); ask=scheduler skips this project.
+  {
+    name: "workhorse_tick",
+    description:
+      "Periodically nudge a workhorse Claude to take one concrete next step from the project's nextSteps.",
+    riskLevel: "medium",
+  },
 ];
 
 export type AutonomyConfig = {

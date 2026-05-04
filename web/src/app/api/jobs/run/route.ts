@@ -4,7 +4,13 @@ import type { JobKind } from "@/generated/prisma/client";
 
 export async function POST(req: NextRequest) {
   const { kind } = (await req.json()) as { kind: JobKind };
-  const ok = new Set(["wandb_pull", "github_pull", "stall_detect"]);
+  const ok = new Set([
+    "wandb_pull",
+    "github_pull",
+    "stall_detect",
+    "project_brain_global",
+    "workhorse_tick_global",
+  ]);
   if (!ok.has(kind))
     return NextResponse.json({ error: "unknown kind" }, { status: 400 });
   try {

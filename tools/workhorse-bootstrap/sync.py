@@ -247,9 +247,78 @@ def execute_directive(
             project_id=project_id,
             root=root,
         )
+    if name == "workhorse_tick":
+        return _workhorse_tick(
+            session_name=session_name,
+            payload=payload,
+        )
     if name == "ping":
         return {"ok": True, "noted": "pong"}
     return {"ok": False, "error": f"unknown directive: {name!r}"}
+
+
+_DEFAULT_TICK_PROMPT = (
+    "Tick. Read this project's `nextSteps` via "
+    "`mcp__sciencedash__get_project`. Pick exactly one concrete action and "
+    "take it. If `nextSteps` is empty or stale, `create_check_in(kind=\"plan\")` "
+    "proposing the next 3 steps. Be terse."
+)
+
+
+def _workhorse_tick(session_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Inject a one-shot prompt into a running workhorse Claude session.
+
+    The prompt is sent via `tmux send-keys`. Claude's REPL queues the
+    input at its next idle point — if a turn is in flight, the keys land
+    in the input buffer and become the next user message. This is the
+    standard interactive behaviour; no gate on "is claude at prompt"
+    needed at the directive level (the dashboard side gates on activity
+    recency before queueing).
+    """
+    if not shutil.which("tmux"):
+        return {"ok": False, "error": "tmux not on PATH"}
+    if _tmux_has_session(session_name) is not True:
+        return {"ok": False, "error": f"tmux session {session_name!r} not alive"}
+    prompt = payload.get("prompt") if isinstance(payload, dict) else None
+    if not isinstance(prompt, str) or not prompt.strip():
+        prompt = _DEFAULT_TICK_PROMPT
+    # `-l` (literal) avoids tmux interpreting characters like `;` or `$`
+    # in the prompt as send-keys metacharacters.
+    #
+    # tmux nuance: `send-keys -t =name` is rejected ("can't find pane")
+    # even when the session exists, because send-keys expects a target-
+    # pane spec and the `=` exact-match prefix is only honoured by
+    # has-session/list-panes/etc. Use the bare session name here — the
+    # _tmux_has_session() check above already proved it exists, so the
+    # fuzzy-match pitfall (matching the wrong session) doesn't bite.
+    try:
+        subprocess.run(
+            ["tmux", "send-keys", "-t", session_name, "-l", prompt],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+        # Newline to submit. (Cannot combine with `-l` because `-l` would
+        # send literal `\n` characters; the bare keyname `Enter` triggers
+        # the submission keystroke.)
+        subprocess.run(
+            ["tmux", "send-keys", "-t", session_name, "Enter"],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except subprocess.CalledProcessError as e:
+        return {
+            "ok": False,
+            "error": f"send-keys failed: {e.stderr.decode('utf-8', 'replace')[:200]}",
+        }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "send-keys timed out"}
+    return {
+        "ok": True,
+        "session": session_name,
+        "promptChars": len(prompt),
+    }
 
 
 def _revive_session(

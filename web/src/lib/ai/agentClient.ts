@@ -454,6 +454,79 @@ export function canUseToolForReview(
 }
 
 /**
+ * canUseTool factory for brain heartbeat sessions.
+ *
+ * Two modes:
+ *   - "auto":    same write surface as canUseToolForReview — every
+ *                mcp__sciencedash__* tool is allowed.
+ *   - "propose": message-level writes only. The brain may post messages,
+ *                add notes, and create check-ins, but cannot patch project
+ *                fields (update_project_fields), record decisions
+ *                (record_decision), mutate hypothesis state, or queue/
+ *                dispatch workhorse actions. Read tools are always allowed.
+ *
+ * Implementation note: rather than enumerate all read tools (which grow
+ * over time), we deny by name and allow the rest of mcp__sciencedash__*.
+ */
+export function canUseToolForBrainHeartbeat(
+  mode: "auto" | "propose",
+  allowedHosts: string[],
+  trustedMcpServers: string[] = ["sciencedash"],
+): CanUseTool {
+  // Field-level / dispatch-level mutators denied in propose mode.
+  const PROPOSE_DENY: ReadonlySet<string> = new Set([
+    "update_project_fields",
+    "record_decision",
+    "update_hypothesis_status",
+    "move_run_to_hypothesis",
+    "queue_directive",
+    "dispatch_workhorse",
+  ]);
+  const hosts = allowedHosts.map((h) => h.toLowerCase());
+  const mcpPrefixes = trustedMcpServers.map((s) => `mcp__${s}__`);
+  return async (
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<PermissionResult> => {
+    const mcpPrefix = mcpPrefixes.find((p) => toolName.startsWith(p));
+    if (mcpPrefix) {
+      if (mode === "propose") {
+        const bareName = toolName.slice(mcpPrefix.length);
+        if (PROPOSE_DENY.has(bareName)) {
+          return {
+            behavior: "deny",
+            message: `${bareName} is denied in propose mode — use post_message, add_note, or create_check_in to surface this instead`,
+          };
+        }
+      }
+      return { behavior: "allow", updatedInput: input };
+    }
+    if (toolName === "WebSearch") return { behavior: "allow", updatedInput: input };
+    if (toolName === "WebFetch") {
+      const url = typeof input.url === "string" ? input.url : "";
+      try {
+        const u = new URL(url);
+        const host = u.hostname.toLowerCase();
+        const ok = hosts.some(
+          (h) => host === h || host.endsWith("." + h),
+        );
+        if (ok) return { behavior: "allow", updatedInput: input };
+        return {
+          behavior: "deny",
+          message: `WebFetch host ${host} not in allowlist`,
+        };
+      } catch {
+        return { behavior: "deny", message: `WebFetch got non-URL: ${url}` };
+      }
+    }
+    return {
+      behavior: "deny",
+      message: `tool ${toolName} not allowed in this session`,
+    };
+  };
+}
+
+/**
  * canUseTool factory: allow tool calls only when every file-path argument
  * resolves to a location INSIDE the given working-copy root. Catches `..`
  * traversal, absolute paths outside the root, and any other escape

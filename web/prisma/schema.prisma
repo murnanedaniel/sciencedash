@@ -118,6 +118,8 @@ enum JobKind {
   repo_quickstart
   literature_review
   project_brain
+  project_brain_global
+  workhorse_tick_global
   other
 }
 

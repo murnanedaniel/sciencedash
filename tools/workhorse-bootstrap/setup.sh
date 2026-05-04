@@ -250,6 +250,26 @@ Pick the tool that matches the *shape* of what you're recording, not just the me
 2. `record_decision(kind="budget_escalate"|"narrow"|…, subjectType="project", subjectId="{pid}", rationale=…, evidenceIds=[{{type:"checkIn", id:<from step 1>}}])`.
 3. `post_message(severity="decision", body=<one-liner>)` for `/today`.
 
+## Tick prompts (autonomous nudges)
+
+Periodically — either when the user clicks **Tick** in the dashboard's
+Workhorses panel, or on a 30-min schedule when the project's autonomy
+config has `workhorse_tick: auto` — sync.py will inject a one-shot
+prompt into this REPL via `tmux send-keys`. The prompt typically reads:
+
+> Tick. Read this project's `nextSteps` via `mcp__sciencedash__get_project`.
+> Pick exactly one concrete action and take it. If `nextSteps` is empty
+> or stale, `create_check_in(kind="plan")` proposing the next 3 steps. Be terse.
+
+When you receive a tick prompt:
+1. Treat it as a normal user turn — no special handling needed.
+2. Use the cheat sheet above to pick the right write tool for the
+   action you take.
+3. Keep it to one concrete step. Don't try to do five things at once.
+4. If the project's state already shows that the obvious next step is
+   running (e.g. a workhorse-launched run is mid-flight), just `post_message`
+   with `severity="info"` summarising the wait — don't restart things.
+
 ## Voice contract
 
 Be terse and decision-shaped — match the dashboard's tone.

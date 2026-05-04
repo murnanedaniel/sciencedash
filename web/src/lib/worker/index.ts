@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { withMutex } from "@/lib/worker/mutex";
 import { pullWandb } from "@/lib/ingest/wandb";
 import { pullGithub } from "@/lib/ingest/github";
+import { runHeartbeat } from "@/lib/brain/heartbeat";
+import { decideAutonomy } from "@/lib/brain/autonomy";
 import type { JobKind } from "@/generated/prisma/client";
 
 type Tick = {
@@ -99,6 +101,171 @@ async function stallDetect(): Promise<Record<string, unknown>> {
   return { stalledCount: stalled.length, autoQueued: autoQueued.length };
 }
 
+/**
+ * Brain tick — once per active project per hour, gated by autonomy.
+ *
+ * Per-project autonomy decision (from `autonomyJson.{auto,propose,ask}`
+ * containing the action class `brain_heartbeat`):
+ *   - auto:    runHeartbeat(p.id, mode="auto")    — full MCP write surface.
+ *   - propose: runHeartbeat(p.id, mode="propose") — message-level writes only.
+ *   - ask:     queue a placeholder JobRun the user can one-click. No agent runs.
+ *
+ * Cost predictability: ~5min wall-clock per project max (heartbeat anti-burn
+ * floor is 5min), plus the existing MIN_INTERVAL_MS guard inside runHeartbeat.
+ */
+async function brainTick(): Promise<Record<string, unknown>> {
+  const projects = await prisma.project.findMany({
+    where: { status: "active" },
+    select: { id: true, title: true },
+  });
+  const ran: string[] = [];
+  const proposed: string[] = [];
+  const queued: string[] = [];
+  const errors: Array<{ projectId: string; error: string }> = [];
+  for (const p of projects) {
+    const decision = await decideAutonomy(p.id, "brain_heartbeat");
+    if (decision === "ask") {
+      // One-click placeholder — only enqueue if there isn't already an
+      // unconsumed one waiting. Avoids stacking pending heartbeats.
+      const existing = await prisma.jobRun.findFirst({
+        where: { kind: "project_brain", projectId: p.id, ok: null },
+      });
+      if (!existing) {
+        await prisma.jobRun.create({
+          data: {
+            kind: "project_brain",
+            projectId: p.id,
+            title: `Brain heartbeat (queued, awaiting click): ${p.title}`,
+            startedAt: new Date(),
+            payloadJson: JSON.stringify({ awaiting_user: true }),
+          },
+        });
+        queued.push(p.id);
+      }
+      continue;
+    }
+    try {
+      const result = await runHeartbeat(p.id, { mode: decision });
+      if ("ok" in result && result.ok) {
+        if ("skipped" in result && result.skipped) continue;
+        if (decision === "auto") ran.push(p.id);
+        else proposed.push(p.id);
+      } else if ("error" in result) {
+        errors.push({ projectId: p.id, error: result.error });
+      }
+    } catch (e) {
+      errors.push({
+        projectId: p.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return {
+    activeProjects: projects.length,
+    ranAuto: ran.length,
+    ranPropose: proposed.length,
+    queuedAwaitingClick: queued.length,
+    errors,
+  };
+}
+
+/**
+ * Workhorse tick — queue a `workhorse_tick` directive for each alive
+ * workhorse on a project whose autonomy bucket includes `workhorse_tick`
+ * in `auto`. sync.py picks the directive up on its next sync (≤60s) and
+ * tmux-send-keys's the prompt into the Claude REPL.
+ *
+ * Skips workhorses where:
+ *   - tmuxAlive=false (no session to nudge)
+ *   - lastClaudeBeat within last 5 min (Claude is mid-turn — let it
+ *     finish; next tick will catch it).
+ *   - an unread workhorse_tick directive is already pending for this
+ *     (host, sessionName) channel (avoids stacking).
+ */
+async function workhorseTickAll(): Promise<Record<string, unknown>> {
+  const projects = await prisma.project.findMany({
+    where: { status: "active" },
+    select: { id: true, title: true },
+  });
+  let queued = 0;
+  let skippedNoAutonomy = 0;
+  let skippedNotAlive = 0;
+  let skippedRecentBeat = 0;
+  let skippedAlreadyPending = 0;
+  for (const p of projects) {
+    const decision = await decideAutonomy(p.id, "workhorse_tick");
+    if (decision !== "auto") {
+      skippedNoAutonomy += 1;
+      continue;
+    }
+    const workhorses = await prisma.workhorse.findMany({
+      where: { projectId: p.id },
+      select: {
+        id: true,
+        host: true,
+        sessionName: true,
+        configJson: true,
+        lastClaudeBeat: true,
+      },
+    });
+    for (const w of workhorses) {
+      const tmuxAlive = parseTmuxAlive(w.configJson);
+      if (tmuxAlive !== true) {
+        skippedNotAlive += 1;
+        continue;
+      }
+      const beat = w.lastClaudeBeat?.getTime() ?? 0;
+      if (beat && Date.now() - beat < 5 * 60_000) {
+        skippedRecentBeat += 1;
+        continue;
+      }
+      const source = `dashboard@${w.host}:${w.sessionName}`;
+      const existing = await prisma.agentMessage.findFirst({
+        where: {
+          projectId: p.id,
+          kind: "directive",
+          source,
+          body: "workhorse_tick",
+          readAt: null,
+        },
+        select: { id: true },
+      });
+      if (existing) {
+        skippedAlreadyPending += 1;
+        continue;
+      }
+      await prisma.agentMessage.create({
+        data: {
+          projectId: p.id,
+          kind: "directive",
+          severity: "info",
+          source,
+          body: "workhorse_tick",
+          payloadJson: null, // sync.py uses the default tick prompt
+        },
+      });
+      queued += 1;
+    }
+  }
+  return {
+    queued,
+    skippedNoAutonomy,
+    skippedNotAlive,
+    skippedRecentBeat,
+    skippedAlreadyPending,
+  };
+}
+
+function parseTmuxAlive(configJson: string | null): boolean | null {
+  if (!configJson) return null;
+  try {
+    const c = JSON.parse(configJson) as { tmuxAlive?: unknown };
+    return c.tmuxAlive === true ? true : c.tmuxAlive === false ? false : null;
+  } catch {
+    return null;
+  }
+}
+
 const TICKS: Tick[] = [
   {
     kind: "wandb_pull",
@@ -114,6 +281,16 @@ const TICKS: Tick[] = [
     kind: "stall_detect",
     everyMs: 60 * 60 * 1000,
     run: stallDetect,
+  },
+  {
+    kind: "project_brain_global",
+    everyMs: 60 * 60 * 1000,
+    run: brainTick,
+  },
+  {
+    kind: "workhorse_tick_global",
+    everyMs: 30 * 60 * 1000,
+    run: workhorseTickAll,
   },
 ];
 

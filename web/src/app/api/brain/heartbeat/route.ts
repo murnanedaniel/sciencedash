@@ -7,11 +7,15 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as {
     projectId?: string;
     force?: boolean;
+    mode?: "auto" | "propose";
   };
   if (!body.projectId) {
     return NextResponse.json({ error: "projectId required" }, { status: 400 });
   }
-  const result = await runHeartbeat(body.projectId, { force: body.force === true });
+  const result = await runHeartbeat(body.projectId, {
+    force: body.force === true,
+    mode: body.mode === "propose" ? "propose" : "auto",
+  });
   if ("error" in result && !result.ok) {
     return NextResponse.json(
       { error: result.error, jobId: result.jobId },
