@@ -107,6 +107,11 @@ enum NoteKind {
   other
 }
 
+enum ProgrammeStatus {
+  active
+  parked
+}
+
 enum JobKind {
   wandb_pull
   github_pull
@@ -211,6 +216,14 @@ model Project {
   brainIntervalSec      Int?
   workhorseIntervalSec  Int?
 
+  /// Optional roll-up to a Programme — a coordinated cluster of related
+  /// projects sharing a publication strategy (e.g. "ColliderML tracking",
+  /// "Foundation-model ingredients"). One project belongs to at most one
+  /// programme; null = unprogrammed. onDelete:SetNull so deleting a
+  /// programme detaches its children, doesn't cascade.
+  programmeId         String?
+  programme           Programme?    @relation(fields: [programmeId], references: [id], onDelete: SetNull)
+
   tags                Tag[]         @relation("ProjectTags")
 
   hypotheses          Hypothesis[]
@@ -254,6 +267,35 @@ model RepoLink {
   cachedLastCommitAt  DateTime?
 
   @@unique([projectId, url])
+}
+
+/// A coordinated cluster of related projects sharing a publication
+/// strategy. seed.md §5/§6 — "ColliderML exploitation programme",
+/// "Foundation-model ingredient programme", etc. Lives above Project,
+/// orthogonal to Tag. One project belongs to at most one programme;
+/// detaching is `Project.programmeId = null`.
+model Programme {
+  id                     String           @id @default(cuid())
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  /// Display name. Unique to keep the URL/list/palette unambiguous.
+  name                   String           @unique
+  /// Free-form markdown — the programme thesis. "What story is this
+  /// programme trying to tell, across N projects?"
+  description            String?
+  /// Comma-separated venue list (e.g. "JINST, Comput Phys Comm, NeurIPS").
+  /// Free text for now; can become a relation later.
+  targetVenues           String?
+  /// Programme-level FOM family — what counts as winning across the
+  /// children. Free markdown.
+  figuresOfMerit         String?
+  status                 ProgrammeStatus  @default(active)
+  /// One-line state for the /today rail or rollup ("blocked on X",
+  /// "tracking 3 papers").
+  narrativeReadinessNote String?
+
+  projects               Project[]
 }
 
 model Tag {

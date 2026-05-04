@@ -13,7 +13,7 @@ export default async function DashLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [projects, papers] = await Promise.all([
+  const [projects, papers, programmes] = await Promise.all([
     prisma.project.findMany({
       select: { id: true, title: true },
       orderBy: { updatedAt: "desc" },
@@ -24,6 +24,11 @@ export default async function DashLayout({
       orderBy: { updatedAt: "desc" },
       take: 200,
     }),
+    prisma.programme.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+      take: 100,
+    }),
   ]);
 
   return (
@@ -31,6 +36,7 @@ export default async function DashLayout({
       <aside className="sidebar">
         <nav className="navStack">
           <SidebarLink href="/" label="Today" hotkey="g T" />
+          <SidebarLink href="/programmes" label="Programmes" hotkey="g M" />
           <SidebarLink href="/projects" label="Projects" hotkey="g P" />
           <SidebarLink href="/papers" label="Papers" hotkey="g A" />
           <SidebarLink href="/runs" label="Runs" hotkey="g R" />
@@ -48,7 +54,7 @@ export default async function DashLayout({
         </nav>
       </aside>
       <div className="main">{children}</div>
-      <CommandPalette projects={projects} papers={papers} />
+      <CommandPalette projects={projects} papers={papers} programmes={programmes} />
       <HelpButton />
     </div>
   );

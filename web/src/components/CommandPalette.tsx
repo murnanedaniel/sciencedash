@@ -14,9 +14,11 @@ type Item = {
 export function CommandPalette({
   projects,
   papers,
+  programmes,
 }: {
   projects: Array<{ id: string; title: string }>;
   papers: Array<{ id: string; title: string }>;
+  programmes: Array<{ id: string; name: string }>;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -47,6 +49,7 @@ export function CommandPalette({
           const handler = (ev: KeyboardEvent) => {
             const map: Record<string, string> = {
               t: "/",
+              m: "/programmes",
               p: "/projects",
               a: "/papers",
               r: "/runs",
@@ -106,6 +109,19 @@ export function CommandPalette({
         action: () => router.push("/papers"),
         kbd: "g a",
       },
+      {
+        id: "go-programmes",
+        label: "Programmes",
+        sub: "programmes",
+        action: () => router.push("/programmes"),
+        kbd: "g m",
+      },
+      {
+        id: "new-programme",
+        label: "New programme",
+        sub: "programmes/new",
+        action: () => router.push("/programmes/new"),
+      },
     ];
     for (const p of projects) {
       base.push({
@@ -123,8 +139,16 @@ export function CommandPalette({
         action: () => router.push(`/papers/${p.id}`),
       });
     }
+    for (const p of programmes) {
+      base.push({
+        id: `programme-${p.id}`,
+        label: p.name,
+        sub: "programme",
+        action: () => router.push(`/programmes/${p.id}`),
+      });
+    }
     return base;
-  }, [projects, papers, router]);
+  }, [projects, papers, programmes, router]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();

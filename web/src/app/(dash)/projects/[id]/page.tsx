@@ -31,6 +31,7 @@ import {
   markAllMessagesReadAction,
   deleteMessageAction,
 } from "@/lib/server/agentMessageActions";
+import { setProjectProgrammeAction } from "@/lib/server/programmeActions";
 import { RunAiReviewButton } from "@/components/RunAiReviewButton";
 import { ParetoScatter } from "@/components/ParetoScatter";
 import { TagChips } from "@/components/TagChips";
@@ -103,6 +104,18 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
   if (!projectRow) notFound();
   const unreadMessageCount = await prisma.agentMessage.count({
     where: { projectId: projectRow.id, readAt: null },
+  });
+  // Programmes for the attach dropdown. Limit to active programmes
+  // (parked ones rarely receive new attachments) plus the currently
+  // attached one if any (so a project on a parked programme still
+  // shows its current parent in the dropdown).
+  const programmes = await prisma.programme.findMany({
+    where:
+      projectRow.programmeId
+        ? { OR: [{ status: "active" }, { id: projectRow.programmeId }] }
+        : { status: "active" },
+    select: { id: true, name: true, status: true },
+    orderBy: { name: "asc" },
   });
   const project = { ...projectRow, unreadMessageCount };
 
@@ -234,6 +247,53 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
               <p className="muted small" style={{ marginTop: 8 }}>
                 Promotions are gated on §16.1 fields. Every change is logged as a Decision.
               </p>
+            </div>
+
+            <div className="card">
+              <h2 className="sectionTitle">Programme</h2>
+              <p className="muted small" style={{ marginBottom: 6 }}>
+                Roll this project up into a coordinated programme (a cluster
+                sharing a publication strategy). Tags stay independent.
+              </p>
+              <form
+                action={setProjectProgrammeAction}
+                className="row"
+                style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}
+              >
+                <input type="hidden" name="projectId" value={project.id} />
+                <select
+                  name="programmeId"
+                  defaultValue={project.programmeId ?? ""}
+                  style={{ fontSize: 13, minWidth: 240 }}
+                >
+                  <option value="">— unprogrammed —</option>
+                  {programmes.map((pg) => (
+                    <option key={pg.id} value={pg.id}>
+                      {pg.name}
+                      {pg.status === "parked" ? " (parked)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="button buttonSecondary small"
+                  style={{ padding: "2px 8px", fontSize: 12 }}
+                >
+                  Save
+                </button>
+                {project.programmeId ? (
+                  <Link
+                    className="link small"
+                    href={`/programmes/${project.programmeId}`}
+                  >
+                    Open programme →
+                  </Link>
+                ) : (
+                  <Link className="link small" href="/programmes/new">
+                    + Create programme
+                  </Link>
+                )}
+              </form>
             </div>
 
             <div className="card">
