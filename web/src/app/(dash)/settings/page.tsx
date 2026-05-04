@@ -54,8 +54,89 @@ export default async function SettingsPage() {
 
   const projects = await prisma.project.findMany({
     orderBy: { updatedAt: "desc" },
-    select: { id: true, title: true, aiAutoReviewEnabled: true, status: true },
+    select: {
+      id: true,
+      title: true,
+      aiAutoReviewEnabled: true,
+      status: true,
+      autonomyJson: true,
+      brainIntervalSec: true,
+      workhorseIntervalSec: true,
+      brainLastHeartbeatAt: true,
+    },
   });
+
+  // 7-day cost & silence stats for each project's brain heartbeat. We
+  // compute this as one batched query and bucket on the client to avoid
+  // N+1 round-trips.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const recentBrainRuns = await prisma.jobRun.findMany({
+    where: {
+      kind: "project_brain",
+      startedAt: { gte: sevenDaysAgo },
+      ok: true, // only completed runs count toward cost / silence
+    },
+    select: {
+      projectId: true,
+      costUsd: true,
+      payloadJson: true,
+    },
+  });
+  type ProjectStats = {
+    cycles: number;
+    costUsd: number;
+    silentCycles: number; // cycles that posted 0 messages
+  };
+  const statsByProject = new Map<string, ProjectStats>();
+  for (const r of recentBrainRuns) {
+    if (!r.projectId) continue;
+    const cur = statsByProject.get(r.projectId) ?? {
+      cycles: 0,
+      costUsd: 0,
+      silentCycles: 0,
+    };
+    cur.cycles += 1;
+    cur.costUsd += r.costUsd ?? 0;
+    let messagesPosted = 0;
+    try {
+      const parsed = r.payloadJson ? JSON.parse(r.payloadJson) : null;
+      if (parsed && typeof parsed.messagesPosted === "number") {
+        messagesPosted = parsed.messagesPosted;
+      }
+    } catch {
+      // ignore
+    }
+    if (messagesPosted === 0) cur.silentCycles += 1;
+    statsByProject.set(r.projectId, cur);
+  }
+
+  // For each project, derive the autonomy bucket of brain_heartbeat /
+  // workhorse_tick from the autonomyJson + label the cadence override.
+  type ParsedAutonomy = { auto: string[]; propose: string[]; ask: string[] };
+  function parseBuckets(json: string | null): ParsedAutonomy {
+    if (!json) return { auto: [], propose: [], ask: [] };
+    try {
+      const p = JSON.parse(json) as Partial<ParsedAutonomy>;
+      return {
+        auto: Array.isArray(p.auto) ? p.auto : [],
+        propose: Array.isArray(p.propose) ? p.propose : [],
+        ask: Array.isArray(p.ask) ? p.ask : [],
+      };
+    } catch {
+      return { auto: [], propose: [], ask: [] };
+    }
+  }
+  function bucketOf(buckets: ParsedAutonomy, name: string): "auto" | "propose" | "ask" {
+    if (buckets.auto.includes(name)) return "auto";
+    if (buckets.propose.includes(name)) return "propose";
+    return "ask";
+  }
+  function cadenceLabel(intervalSec: number | null): string {
+    if (intervalSec === null) return "default";
+    if (intervalSec === 0) return "paused";
+    if (intervalSec < 3600) return `${Math.round(intervalSec / 60)}m`;
+    return `${Math.round(intervalSec / 3600)}h`;
+  }
 
   return (
     <div className="container">
@@ -214,6 +295,99 @@ export default async function SettingsPage() {
                     </td>
                   </tr>
                 ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Autonomy loops per project */}
+        <div className="card">
+          <h2 className="sectionTitle">Autonomy loops (per project)</h2>
+          <p className="muted small" style={{ marginBottom: 10 }}>
+            Two scheduled loops control how the brain and workhorses
+            self-drive. Default cadence: brain 12h, workhorse 1h. Toggle
+            buckets and tempo on each project&apos;s Overview tab. Cycles
+            and cost columns cover the last 7 days.
+          </p>
+          <table style={{ width: "100%", fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                  Project
+                </th>
+                <th style={{ textAlign: "center", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                  Brain
+                </th>
+                <th style={{ textAlign: "center", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                  Workhorse
+                </th>
+                <th style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                  Cycles 7d
+                </th>
+                <th style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                  Cost 7d
+                </th>
+                <th style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                  Silent
+                </th>
+                <th style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                  Last brain
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {projects.map((p) => {
+                const buckets = parseBuckets(p.autonomyJson);
+                const brainBucket = bucketOf(buckets, "brain_heartbeat");
+                const workhorseBucket = bucketOf(buckets, "workhorse_tick");
+                const stats = statsByProject.get(p.id) ?? {
+                  cycles: 0,
+                  costUsd: 0,
+                  silentCycles: 0,
+                };
+                const silentRatio = stats.cycles > 0 ? stats.silentCycles / stats.cycles : null;
+                return (
+                  <tr key={p.id}>
+                    <td style={{ padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                      <Link className="link" href={`/projects/${p.id}`}>
+                        {p.title}
+                      </Link>
+                      <span className="muted small"> · {p.status}</span>
+                    </td>
+                    <td style={{ textAlign: "center", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                      <span className="muted small">{brainBucket}</span>
+                      <span style={{ margin: "0 4px", color: "var(--faint)" }}>·</span>
+                      <code style={{ fontSize: 11 }}>{cadenceLabel(p.brainIntervalSec)}</code>
+                    </td>
+                    <td style={{ textAlign: "center", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                      <span className="muted small">{workhorseBucket}</span>
+                      <span style={{ margin: "0 4px", color: "var(--faint)" }}>·</span>
+                      <code style={{ fontSize: 11 }}>{cadenceLabel(p.workhorseIntervalSec)}</code>
+                    </td>
+                    <td style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                      {stats.cycles}
+                    </td>
+                    <td style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}>
+                      ${stats.costUsd.toFixed(2)}
+                    </td>
+                    <td
+                      className="muted small"
+                      style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}
+                    >
+                      {silentRatio === null
+                        ? "–"
+                        : `${stats.silentCycles}/${stats.cycles}`}
+                    </td>
+                    <td
+                      className="muted small"
+                      style={{ textAlign: "right", padding: "6px 4px", borderBottom: "1px solid var(--border)" }}
+                    >
+                      {p.brainLastHeartbeatAt
+                        ? daysAgoLabel(p.brainLastHeartbeatAt)
+                        : "never"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

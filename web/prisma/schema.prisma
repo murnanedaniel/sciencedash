@@ -202,6 +202,15 @@ model Project {
   /// Anything not listed defaults to "ask" — conservative.
   autonomyJson          String?
 
+  /// Per-project cadence overrides (seconds) for the autonomy loops.
+  /// Null = use the worker's global default (DEFAULT_BRAIN_INTERVAL_SEC,
+  /// DEFAULT_WORKHORSE_INTERVAL_SEC). 0 = paused (worker tick skips this
+  /// project entirely). Only applies when the project's autonomy bucket
+  /// for the corresponding action class is `auto` or `propose`; an
+  /// `ask` bucket already prevents the loop from firing.
+  brainIntervalSec      Int?
+  workhorseIntervalSec  Int?
+
   tags                Tag[]         @relation("ProjectTags")
 
   hypotheses          Hypothesis[]

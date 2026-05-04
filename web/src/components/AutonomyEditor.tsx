@@ -13,11 +13,37 @@ import {
   DEFAULT_AUTONOMY,
   type AutonomyConfig,
 } from "@/lib/brain/autonomy";
+import {
+  DEFAULT_BRAIN_INTERVAL_SEC,
+  DEFAULT_WORKHORSE_INTERVAL_SEC,
+} from "@/lib/worker";
 
 type Props = {
   projectId: string;
   autonomyJson: string | null;
+  brainIntervalSec: number | null;
+  workhorseIntervalSec: number | null;
 };
+
+// Cadence options offered in the dropdowns. Values in seconds. 0 = paused;
+// "" (empty string) = use the worker's global default.
+const BRAIN_CADENCE_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: "Default (12h)", value: "" },
+  { label: "Paused", value: "0" },
+  { label: "1h", value: String(1 * 3600) },
+  { label: "6h", value: String(6 * 3600) },
+  { label: "12h", value: String(12 * 3600) },
+  { label: "24h", value: String(24 * 3600) },
+];
+const WORKHORSE_CADENCE_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: "Default (1h)", value: "" },
+  { label: "Paused", value: "0" },
+  { label: "30m", value: String(30 * 60) },
+  { label: "1h", value: String(1 * 3600) },
+  { label: "6h", value: String(6 * 3600) },
+  { label: "12h", value: String(12 * 3600) },
+  { label: "24h", value: String(24 * 3600) },
+];
 
 const RISK_COLORS: Record<string, string> = {
   low: "var(--accent, #2a8c4a)",
@@ -53,8 +79,20 @@ function classBucket(cfg: AutonomyConfig, name: string): "auto" | "propose" | "a
   return "ask";
 }
 
-export function AutonomyEditor({ projectId, autonomyJson }: Props) {
+export function AutonomyEditor({
+  projectId,
+  autonomyJson,
+  brainIntervalSec,
+  workhorseIntervalSec,
+}: Props) {
   const cfg = parseAutonomy(autonomyJson);
+  // Render the dropdown's `defaultValue` as the matching option string,
+  // or "" (which represents the global-default option) if the project's
+  // override is null.
+  const brainSelectValue =
+    brainIntervalSec === null ? "" : String(brainIntervalSec);
+  const workhorseSelectValue =
+    workhorseIntervalSec === null ? "" : String(workhorseIntervalSec);
 
   // Surface any custom (non-known) classes the user has added so they
   // don't get silently dropped on save.
@@ -143,6 +181,56 @@ export function AutonomyEditor({ projectId, autonomyJson }: Props) {
             </span>
           </div>
         </details>
+
+        <div
+          style={{
+            marginTop: 16,
+            paddingTop: 12,
+            borderTop: "1px solid var(--border)",
+          }}
+        >
+          <div className="muted small" style={{ marginBottom: 6 }}>
+            <strong>Cadence</strong> · how often the autonomous loops fire for
+            this project. Defaults are conservative — most cycles emit nothing
+            (the brain&apos;s voice contract is &quot;default silent&quot;).
+          </div>
+          <div className="row" style={{ gap: 14, flexWrap: "wrap" }}>
+            <label className="field" style={{ minWidth: 220 }}>
+              <span className="muted small">Brain heartbeat</span>
+              <select
+                name="brainIntervalSec"
+                defaultValue={brainSelectValue}
+                style={{ fontSize: 13 }}
+              >
+                {BRAIN_CADENCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field" style={{ minWidth: 220 }}>
+              <span className="muted small">Workhorse tick</span>
+              <select
+                name="workhorseIntervalSec"
+                defaultValue={workhorseSelectValue}
+                style={{ fontSize: 13 }}
+              >
+                {WORKHORSE_CADENCE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="muted small" style={{ marginTop: 6 }}>
+            Defaults: brain {Math.round(DEFAULT_BRAIN_INTERVAL_SEC / 3600)}h ·
+            workhorse {Math.round(DEFAULT_WORKHORSE_INTERVAL_SEC / 3600)}h.
+            &quot;Paused&quot; means the worker tick skips this project entirely
+            even if the autonomy bucket would otherwise fire.
+          </div>
+        </div>
 
         <div className="row" style={{ gap: 14, marginTop: 14, flexWrap: "wrap" }}>
           <label className="field" style={{ minWidth: 200 }}>

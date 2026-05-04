@@ -539,7 +539,12 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
               </div>
             </div>
 
-            <AutonomyEditor projectId={project.id} autonomyJson={project.autonomyJson} />
+            <AutonomyEditor
+              projectId={project.id}
+              autonomyJson={project.autonomyJson}
+              brainIntervalSec={project.brainIntervalSec}
+              workhorseIntervalSec={project.workhorseIntervalSec}
+            />
 
             <div className="card danger">
               <h2 className="sectionTitle">Danger zone</h2>

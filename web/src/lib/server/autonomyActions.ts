@@ -76,7 +76,32 @@ export async function setAutonomyAction(formData: FormData): Promise<void> {
   };
 
   await setAutonomyConfig(projectId, cfg);
+
+  // Per-project tempo. The two values are decoupled from autonomyJson —
+  // they live as their own columns. Empty / missing form value = leave
+  // unchanged. "" (empty string from a select with no value) = null
+  // (revert to default). 0 = paused.
+  const brainRaw = formData.get("brainIntervalSec");
+  const workhorseRaw = formData.get("workhorseIntervalSec");
+  const tempoUpdate: { brainIntervalSec?: number | null; workhorseIntervalSec?: number | null } = {};
+  if (typeof brainRaw === "string") {
+    tempoUpdate.brainIntervalSec = brainRaw === "" ? null : sanitizeInterval(brainRaw);
+  }
+  if (typeof workhorseRaw === "string") {
+    tempoUpdate.workhorseIntervalSec = workhorseRaw === "" ? null : sanitizeInterval(workhorseRaw);
+  }
+  if (Object.keys(tempoUpdate).length > 0) {
+    await prisma.project.update({ where: { id: projectId }, data: tempoUpdate });
+  }
+
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/settings`);
+}
+
+function sanitizeInterval(raw: string): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.floor(n);
 }
 
 function parseExisting(autonomyJson: string | null | undefined): AutonomyConfig {

@@ -102,27 +102,61 @@ async function stallDetect(): Promise<Record<string, unknown>> {
 }
 
 /**
- * Brain tick — once per active project per hour, gated by autonomy.
+ * Default cadence per autonomy loop. Per-project overrides via
+ * Project.brainIntervalSec / Project.workhorseIntervalSec take precedence;
+ * 0 means paused; null means use these defaults.
  *
- * Per-project autonomy decision (from `autonomyJson.{auto,propose,ask}`
- * containing the action class `brain_heartbeat`):
- *   - auto:    runHeartbeat(p.id, mode="auto")    — full MCP write surface.
- *   - propose: runHeartbeat(p.id, mode="propose") — message-level writes only.
+ * The chosen defaults are conservative — most research projects don't
+ * generate new info every hour, and the "default silent" voice contract
+ * means most cycles emit nothing. 12h gives one cycle morning, one
+ * cycle evening for the brain; 1h is fine for the workhorse_tick which
+ * only fires when its own preconditions hold.
+ */
+export const DEFAULT_BRAIN_INTERVAL_SEC = 12 * 3600;
+export const DEFAULT_WORKHORSE_INTERVAL_SEC = 1 * 3600;
+
+/**
+ * Brain tick — gated by per-project autonomy AND per-project tempo.
+ *
+ * Autonomy bucket (from `autonomyJson` action class `brain_heartbeat`):
+ *   - auto:    runHeartbeat(mode="auto")    — full MCP write surface.
+ *   - propose: runHeartbeat(mode="propose") — message-level writes only.
  *   - ask:     queue a placeholder JobRun the user can one-click. No agent runs.
  *
- * Cost predictability: ~5min wall-clock per project max (heartbeat anti-burn
- * floor is 5min), plus the existing MIN_INTERVAL_MS guard inside runHeartbeat.
+ * Tempo gate (from `Project.brainIntervalSec`, falling back to default):
+ *   - 0 (paused): worker tick skips the project entirely. No placeholder either.
+ *   - >0: worker tick fires only if `now - brainLastHeartbeatAt >= intervalSec`.
+ *
+ * The ask-mode placeholder is also tempo-gated: no point creating a new
+ * placeholder every hour if the project's cadence is 24h.
  */
 async function brainTick(): Promise<Record<string, unknown>> {
   const projects = await prisma.project.findMany({
     where: { status: "active" },
-    select: { id: true, title: true },
+    select: {
+      id: true,
+      title: true,
+      brainIntervalSec: true,
+      brainLastHeartbeatAt: true,
+    },
   });
   const ran: string[] = [];
   const proposed: string[] = [];
   const queued: string[] = [];
+  const skippedTempo: string[] = [];
+  const skippedPaused: string[] = [];
   const errors: Array<{ projectId: string; error: string }> = [];
   for (const p of projects) {
+    const intervalSec = p.brainIntervalSec ?? DEFAULT_BRAIN_INTERVAL_SEC;
+    if (intervalSec <= 0) {
+      skippedPaused.push(p.id);
+      continue;
+    }
+    const lastBeat = p.brainLastHeartbeatAt?.getTime() ?? 0;
+    if (lastBeat && Date.now() - lastBeat < intervalSec * 1000) {
+      skippedTempo.push(p.id);
+      continue;
+    }
     const decision = await decideAutonomy(p.id, "brain_heartbeat");
     if (decision === "ask") {
       // One-click placeholder — only enqueue if there isn't already an
@@ -165,37 +199,46 @@ async function brainTick(): Promise<Record<string, unknown>> {
     ranAuto: ran.length,
     ranPropose: proposed.length,
     queuedAwaitingClick: queued.length,
+    skippedTempo: skippedTempo.length,
+    skippedPaused: skippedPaused.length,
     errors,
   };
 }
 
 /**
- * Workhorse tick — queue a `workhorse_tick` directive for each alive
- * workhorse on a project whose autonomy bucket includes `workhorse_tick`
- * in `auto`. sync.py picks the directive up on its next sync (≤60s) and
- * tmux-send-keys's the prompt into the Claude REPL.
+ * Workhorse tick — queue a `workhorse_tick` directive per alive workhorse,
+ * gated by autonomy AND per-project tempo.
  *
- * Skips workhorses where:
- *   - tmuxAlive=false (no session to nudge)
- *   - lastClaudeBeat within last 5 min (Claude is mid-turn — let it
- *     finish; next tick will catch it).
- *   - an unread workhorse_tick directive is already pending for this
- *     (host, sessionName) channel (avoids stacking).
+ * Skip reasons:
+ *   - autonomy bucket for `workhorse_tick` is not `auto`
+ *   - `Project.workhorseIntervalSec === 0` (paused)
+ *   - workhorse `tmuxAlive=false` (no session to nudge)
+ *   - `lastClaudeBeat` within last 5 min (Claude likely mid-turn)
+ *   - last `workhorse_tick` directive on this (host, sessionName) channel
+ *     was queued less than `workhorseIntervalSec` ago
+ *   - an unread `workhorse_tick` is already pending (dedup)
  */
 async function workhorseTickAll(): Promise<Record<string, unknown>> {
   const projects = await prisma.project.findMany({
     where: { status: "active" },
-    select: { id: true, title: true },
+    select: { id: true, title: true, workhorseIntervalSec: true },
   });
   let queued = 0;
   let skippedNoAutonomy = 0;
+  let skippedPaused = 0;
   let skippedNotAlive = 0;
   let skippedRecentBeat = 0;
   let skippedAlreadyPending = 0;
+  let skippedTempo = 0;
   for (const p of projects) {
     const decision = await decideAutonomy(p.id, "workhorse_tick");
     if (decision !== "auto") {
       skippedNoAutonomy += 1;
+      continue;
+    }
+    const intervalSec = p.workhorseIntervalSec ?? DEFAULT_WORKHORSE_INTERVAL_SEC;
+    if (intervalSec <= 0) {
+      skippedPaused += 1;
       continue;
     }
     const workhorses = await prisma.workhorse.findMany({
@@ -220,19 +263,27 @@ async function workhorseTickAll(): Promise<Record<string, unknown>> {
         continue;
       }
       const source = `dashboard@${w.host}:${w.sessionName}`;
-      const existing = await prisma.agentMessage.findFirst({
+      // Most-recent tick directive on this channel — drives both dedup
+      // (unread → already pending) and tempo (recently queued → wait).
+      const lastTick = await prisma.agentMessage.findFirst({
         where: {
           projectId: p.id,
           kind: "directive",
           source,
           body: "workhorse_tick",
-          readAt: null,
         },
-        select: { id: true },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true, readAt: true },
       });
-      if (existing) {
-        skippedAlreadyPending += 1;
-        continue;
+      if (lastTick) {
+        if (!lastTick.readAt) {
+          skippedAlreadyPending += 1;
+          continue;
+        }
+        if (Date.now() - lastTick.createdAt.getTime() < intervalSec * 1000) {
+          skippedTempo += 1;
+          continue;
+        }
       }
       await prisma.agentMessage.create({
         data: {
@@ -250,9 +301,11 @@ async function workhorseTickAll(): Promise<Record<string, unknown>> {
   return {
     queued,
     skippedNoAutonomy,
+    skippedPaused,
     skippedNotAlive,
     skippedRecentBeat,
     skippedAlreadyPending,
+    skippedTempo,
   };
 }
 
