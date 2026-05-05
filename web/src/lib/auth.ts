@@ -18,6 +18,7 @@
  */
 
 import { createHmac, timingSafeEqual, createHash } from "node:crypto";
+import type { NextRequest } from "next/server";
 
 export const COOKIE_NAME = "sd-session";
 export const COOKIE_TTL_SEC = 365 * 24 * 60 * 60;
@@ -101,6 +102,33 @@ export function verifyBearer(authHeader: string | undefined | null): boolean {
  * any reasonable password). The hashing is here to keep the plaintext
  * out of process listings, env dumps, and accidental log output.
  */
+/**
+ * Build a same-origin redirect URL for the *public* hostname the user
+ * actually hit, not the localhost bind address. When the dashboard runs
+ * behind a reverse proxy (Tailscale Funnel, cloudflared, nginx) it
+ * forwards to localhost:3000, and `req.nextUrl` reflects the bind
+ * address — so naively calling `req.nextUrl.clone()` and redirecting
+ * leaks `https://localhost:3000/...` back to the user's browser.
+ *
+ * Use the X-Forwarded-{Host,Proto} headers set by the proxy if present,
+ * fall back to Host header, fall back to nextUrl. Same-origin only.
+ */
+export function buildRedirectURL(
+  req: NextRequest,
+  pathAndSearch: string,
+): URL {
+  const host =
+    req.headers.get("x-forwarded-host") ??
+    req.headers.get("host") ??
+    req.nextUrl.host;
+  const proto =
+    req.headers.get("x-forwarded-proto") ??
+    req.nextUrl.protocol.replace(/:$/, "");
+  // Sanity: if `pathAndSearch` doesn't start with `/`, treat as path.
+  const path = pathAndSearch.startsWith("/") ? pathAndSearch : `/${pathAndSearch}`;
+  return new URL(path, `${proto}://${host}`);
+}
+
 export function verifyPassword(plaintext: string): boolean {
   if (!plaintext) return false;
   const salt = readSecret("SCIENCEDASH_PASSWORD_SALT");

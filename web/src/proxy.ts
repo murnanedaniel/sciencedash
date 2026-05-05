@@ -16,6 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import {
+  buildRedirectURL,
   COOKIE_NAME,
   COOKIE_TTL_SEC,
   shouldRefreshSession,
@@ -77,10 +78,11 @@ export function proxy(request: NextRequest): NextResponse {
 
   // 3. Unauthenticated.
   if (wantsHtml(request)) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = `?next=${encodeURIComponent(pathname + search)}`;
-    return NextResponse.redirect(url);
+    const target = buildRedirectURL(
+      request,
+      `/login?next=${encodeURIComponent(pathname + search)}`,
+    );
+    return NextResponse.redirect(target);
   }
   return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 }

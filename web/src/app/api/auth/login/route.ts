@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  buildRedirectURL,
   COOKIE_NAME,
   COOKIE_TTL_SEC,
   signSession,
@@ -25,16 +26,15 @@ export async function POST(req: NextRequest) {
     rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
 
   if (!verifyPassword(password)) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = `?error=1&next=${encodeURIComponent(safeNext)}`;
-    return NextResponse.redirect(url, { status: 303 });
+    const target = buildRedirectURL(
+      req,
+      `/login?error=1&next=${encodeURIComponent(safeNext)}`,
+    );
+    return NextResponse.redirect(target, { status: 303 });
   }
 
-  const url = req.nextUrl.clone();
-  url.pathname = safeNext;
-  url.search = "";
-  const res = NextResponse.redirect(url, { status: 303 });
+  const target = buildRedirectURL(req, safeNext);
+  const res = NextResponse.redirect(target, { status: 303 });
   res.cookies.set({
     name: COOKIE_NAME,
     value: signSession(),
