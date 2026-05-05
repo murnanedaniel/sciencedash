@@ -51,6 +51,26 @@ export default async function DashLayout({
             <br />? · help
             <br />n · new project
           </div>
+          <div className="navDivider" />
+          <form
+            action="/api/auth/logout"
+            method="post"
+            style={{ padding: "6px 12px" }}
+          >
+            <button
+              type="submit"
+              className="muted small"
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                font: "inherit",
+              }}
+            >
+              Log out
+            </button>
+          </form>
         </nav>
       </aside>
       <div className="main">{children}</div>

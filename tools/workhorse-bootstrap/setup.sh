@@ -135,23 +135,26 @@ cfg = json.loads(cfg_path.read_text())
 host = cfg.get("host", "unknown-host")
 dashboard = cfg.get("dashboard_url", "http://localhost:3000").rstrip("/")
 
-# If a Cloudflare Access service token is provisioned for this
-# workhorse, bake its two headers into each session's mcp-config.json
-# so Claude's MCP tool calls also pass the Access gate. Format: the
-# same shell-style `KEY=VALUE` lines that sync.py reads.
-cf_headers = {}
-cf_env = root / "cf-access.env"
-if cf_env.exists():
-    for line in cf_env.read_text().splitlines():
+# Read SCIENCEDASH_AUTH_TOKEN from auth.env and bake it into each
+# session's mcp-config.json so Claude's MCP tool calls authenticate
+# at the dashboard's app-level proxy. Format: shell-style KEY=VALUE
+# lines (same file sync.py reads).
+#
+# Replaces the old cf-access.env path. Cloudflare Access is no longer
+# used; the dashboard self-authenticates via this Bearer token.
+auth_headers = {}
+auth_env = root / "auth.env"
+if auth_env.exists():
+    for line in auth_env.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        k, v = k.strip(), v.strip().strip('"').strip("'")
-        if k == "CF_ACCESS_CLIENT_ID" and v:
-            cf_headers["CF-Access-Client-Id"] = v
-        elif k == "CF_ACCESS_CLIENT_SECRET" and v:
-            cf_headers["CF-Access-Client-Secret"] = v
+        if k.strip() == "SCIENCEDASH_AUTH_TOKEN":
+            token = v.strip().strip('"').strip("'")
+            if token:
+                auth_headers["Authorization"] = f"Bearer {token}"
+            break
 
 for p in cfg.get("projects", []):
     pid = p.get("projectId")
@@ -170,9 +173,11 @@ for p in cfg.get("projects", []):
     # mcp-config.json — used with `claude --mcp-config <file>`. The
     # X-Workhorse-Id header makes each session's MCP calls identify
     # themselves, so claudeBeat updates the right Workhorse row.
+    # Authorization: Bearer <token> authenticates at the dashboard's
+    # app-level proxy.
     mcp_path = session_dir / "mcp-config.json"
     headers = {"X-Workhorse-Id": f"{host}:{session}"}
-    headers.update(cf_headers)
+    headers.update(auth_headers)
     mcp_path.write_text(json.dumps({
         "mcpServers": {
             "sciencedash": {
@@ -182,8 +187,8 @@ for p in cfg.get("projects", []):
             }
         }
     }, indent=2) + "\n")
-    # mcp-config.json contains the CF-Access secret if Access is on;
-    # tighten perms so other users on this host can't read it.
+    # mcp-config.json contains the bearer token; tighten perms so other
+    # users on this host can't read it.
     mcp_path.chmod(0o600)
     print(f"==> wrote {mcp_path}")
 

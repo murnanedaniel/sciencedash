@@ -97,30 +97,35 @@ def acquire_lock(lock_path: Path):
 # ----------------------------- HTTP -------------------------------------- #
 
 
-def _load_cf_access_headers(root: Path) -> dict[str, str]:
-    """Read CF-Access service-token headers from `<root>/cf-access.env`.
-    Format: shell-style KEY=VALUE lines (CF_ACCESS_CLIENT_ID,
-    CF_ACCESS_CLIENT_SECRET). Returns {} if absent — dashboard then
-    must be open / on a non-Access network for sync to work.
+def _load_auth_headers(root: Path) -> dict[str, str]:
+    """Read SCIENCEDASH_AUTH_TOKEN from `<root>/auth.env` and emit a
+    single `Authorization: Bearer <token>` header dict.
+
+    Format: shell-style KEY=VALUE lines. Only `SCIENCEDASH_AUTH_TOKEN`
+    is consumed; other keys are ignored so the file can grow with future
+    workhorse-side env without a sync.py change.
+
+    Returns {} if the file is absent or the token is blank — the
+    dashboard then 401s every sync POST. That's the intended failure
+    mode (better than silently sending unauthenticated traffic).
+
+    Replaces the old `_load_cf_access_headers` path. The Cloudflare
+    Access service-token model is no longer used; the dashboard
+    self-authenticates via this token at the application proxy.
     """
-    env_path = root / "cf-access.env"
+    env_path = root / "auth.env"
     if not env_path.exists():
         return {}
-    out: dict[str, str] = {}
     for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        out[k.strip()] = v.strip().strip('"').strip("'")
-    headers: dict[str, str] = {}
-    cid = out.get("CF_ACCESS_CLIENT_ID")
-    sec = out.get("CF_ACCESS_CLIENT_SECRET")
-    if cid:
-        headers["CF-Access-Client-Id"] = cid
-    if sec:
-        headers["CF-Access-Client-Secret"] = sec
-    return headers
+        if k.strip() == "SCIENCEDASH_AUTH_TOKEN":
+            token = v.strip().strip('"').strip("'")
+            if token:
+                return {"Authorization": f"Bearer {token}"}
+    return {}
 
 
 def post_json(
@@ -507,7 +512,7 @@ def sync_one_project(
 
     # 3. POST to dashboard.
     sync_url = cfg["dashboard_url"].rstrip("/") + "/api/mcp/sync"
-    cf_headers = _load_cf_access_headers(root)
+    auth_headers = _load_auth_headers(root)
     try:
         resp = post_json(sync_url, {
             "host": cfg["host"],
@@ -534,7 +539,7 @@ def sync_one_project(
             # dashboard surfaces this as the right ssh target for attach.
             "activeHost": socket.gethostname(),
             "outbox": outbox_items,
-        }, extra_headers=cf_headers)
+        }, extra_headers=auth_headers)
     except RuntimeError as e:
         _log(log_path, f"[{project_id}] sync POST failed: {e}")
         # Don't commit the flush — next tick will retry.
