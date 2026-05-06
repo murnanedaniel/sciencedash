@@ -237,6 +237,8 @@ model Project {
   repoLinks           RepoLink[]
   agentMessages       AgentMessage[]
   workhorses          Workhorse[]
+
+  @@index([programmeId])
 }
 
 model WandbSource {
@@ -591,4 +593,28 @@ model AgentMessage {
 
   @@index([projectId, createdAt])
   @@index([projectId, readAt])
+}
+
+/// Persisted record of a chat between the user and a global-brain advisor
+/// session (a local Claude REPL running with the ScienceDash MCP loaded).
+///
+/// The chat Claude calls `submit_brain_chat` at end-of-session with the
+/// full markdown transcript. The global brain heartbeat then sweeps rows
+/// where summaryMd is null, summarises them in 3–6 bullets, and writes
+/// the summary back so future sessions inherit continuity through the
+/// CHAT_CONTEXT primer.
+model BrainChat {
+  id            String    @id @default(cuid())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  title         String
+  /// Full conversation as markdown with speaker turns.
+  transcriptMd  String
+  /// 3–6 bullet summary written by the heartbeat sweep. Null until summarised.
+  summaryMd     String?
+  summarizedAt  DateTime?
+
+  @@index([createdAt])
+  @@index([summarizedAt])
 }

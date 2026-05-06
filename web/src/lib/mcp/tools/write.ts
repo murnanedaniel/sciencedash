@@ -614,6 +614,50 @@ const setProjectBlocker: ToolDefinition = {
   },
 };
 
+const submitBrainChat: ToolDefinition = {
+  name: "submit_brain_chat",
+  description:
+    "Persist a finished brain-chat session — call this when the user signals end-of-session ('done', 'that's all', 'goodbye', or naturally stops engaging on a topic). Pass the full markdown transcript with speaker turns, plus a 3–6 bullet summary covering decisions made, open questions, and any state changes you wrote during the chat. The global brain heartbeat will surface chats lacking a summary; passing one here lets the chat be useful immediately. Title should be a 4–8 word handle (e.g. 'tracking project unblock plan', 'literature review for HEP4M').",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: {
+        type: "string",
+        description: "Short handle for the chat (4–8 words).",
+      },
+      transcriptMd: {
+        type: "string",
+        description: "Full conversation reformatted as markdown with speaker turns.",
+      },
+      summaryMd: {
+        type: "string",
+        description: "Optional 3–6 bullet summary. If omitted, the heartbeat sweep fills it in.",
+      },
+    },
+    required: ["title", "transcriptMd"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const title = requireString(args, "title");
+    const transcriptMd = requireString(args, "transcriptMd");
+    const summaryMd = optString(args, "summaryMd") ?? null;
+    const chat = await prisma.brainChat.create({
+      data: {
+        title,
+        transcriptMd,
+        summaryMd,
+        summarizedAt: summaryMd ? new Date() : null,
+      },
+      select: { id: true, createdAt: true, summarizedAt: true },
+    });
+    return jsonResult({
+      id: chat.id,
+      createdAt: chat.createdAt,
+      summarised: !!chat.summarizedAt,
+    });
+  },
+};
+
 export const writeTools: ToolDefinition[] = [
   createCheckIn,
   recordDecision,
@@ -626,4 +670,5 @@ export const writeTools: ToolDefinition[] = [
   markMessageRead,
   queueDirective,
   dispatchWorkhorse,
+  submitBrainChat,
 ];

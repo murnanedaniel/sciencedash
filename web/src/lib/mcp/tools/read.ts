@@ -498,6 +498,62 @@ function deriveWorkhorseState(
   return "dead";
 }
 
+const listBrainChats: ToolDefinition = {
+  name: "list_brain_chats",
+  description:
+    "List recent persisted brain-chat sessions (the user's freeform Claude chats with the global brain). Returns id, title, createdAt, summarizedAt, and the bullet summary if the heartbeat has summarised it. Useful for stitching continuity across sessions: in a new chat, call this with limit=3 to see what was discussed lately.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      limit: {
+        type: "number",
+        description: "Max chats to return (default 20).",
+      },
+    },
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const limit = optInt(args, "limit") ?? 20;
+    const chats = await prisma.brainChat.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        createdAt: true,
+        summarizedAt: true,
+        summaryMd: true,
+      },
+    });
+    return jsonResult(chats);
+  },
+};
+
+const getBrainChat: ToolDefinition = {
+  name: "get_brain_chat",
+  description:
+    "Fetch a single persisted brain-chat session by id, including the full markdown transcript.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "BrainChat id." },
+    },
+    required: ["id"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const id = requireString(args, "id");
+    const chat = await prisma.brainChat.findUnique({ where: { id } });
+    if (!chat) {
+      return {
+        content: [{ type: "text", text: `no brain chat with id: ${id}` }],
+        isError: true,
+      };
+    }
+    return jsonResult(chat);
+  },
+};
+
 export const readTools: ToolDefinition[] = [
   listProjects,
   getProject,
@@ -510,4 +566,6 @@ export const readTools: ToolDefinition[] = [
   getHypothesis,
   listMessages,
   listWorkhorses,
+  listBrainChats,
+  getBrainChat,
 ];

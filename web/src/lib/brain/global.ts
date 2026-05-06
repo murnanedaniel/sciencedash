@@ -10,6 +10,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { runHeartbeat, type HeartbeatResult } from "@/lib/brain/heartbeat";
+import { summariseUnsummarisedBrainChats } from "@/lib/brain/chat-summarize";
 
 export type GlobalHeartbeatResult = {
   ran: number;
@@ -21,6 +22,7 @@ export type GlobalHeartbeatResult = {
     title: string;
     result: HeartbeatResult;
   }>;
+  brainChats: { summarised: number; failed: number; totalCostUsd: number };
 };
 
 export async function runGlobalHeartbeat(opts: { force?: boolean } = {}): Promise<GlobalHeartbeatResult> {
@@ -51,5 +53,13 @@ export async function runGlobalHeartbeat(opts: { force?: boolean } = {}): Promis
     }
   }
 
-  return { ran, skipped, failed, totalCostUsd, perProject };
+  // Sweep unsummarised brain-chat sessions. Best-effort, failure-isolated;
+  // the user's chats are persisted regardless of whether summarisation lands.
+  const brainChats = await summariseUnsummarisedBrainChats().catch((e) => {
+    console.error("summariseUnsummarisedBrainChats failed:", e);
+    return { summarised: 0, failed: 0, totalCostUsd: 0 };
+  });
+  totalCostUsd += brainChats.totalCostUsd;
+
+  return { ran, skipped, failed, totalCostUsd, perProject, brainChats };
 }

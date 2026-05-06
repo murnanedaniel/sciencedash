@@ -43,6 +43,7 @@ export default async function DashLayout({
           <SidebarLink href="/reading" label="Reading" hotkey="g N" />
           <div className="navDivider" />
           <SidebarLink href="/portfolio" label="Portfolio" hotkey="g O" />
+          <SidebarLink href="/brain-chat" label="Brain chat" hotkey="g B" />
           <div className="navDivider" />
           <SidebarLink href="/settings" label="Settings" hotkey="g S" />
           <div className="navDivider" />

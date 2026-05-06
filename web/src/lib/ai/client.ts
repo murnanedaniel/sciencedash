@@ -185,6 +185,55 @@ export async function callClaudeJson<T>(
 }
 
 /**
+ * Single-shot Claude text completion with an inline system prompt. Same
+ * Claude-CLI billing as `callClaudeJson`, but returns the raw assistant
+ * text instead of a parsed JSON object. Use for tasks where the output
+ * is markdown / prose, not a structured payload (e.g. chat summaries).
+ */
+export async function callClaudeText(args: {
+  systemPrompt: string;
+  userContent: string;
+  model?: string;
+}): Promise<{ text: string; costUsd: number | null }> {
+  const claudePath = await resolveClaudePath();
+  const q = query({
+    prompt: args.userContent,
+    options: {
+      systemPrompt: args.systemPrompt,
+      model: args.model ?? "claude-opus-4-7",
+      cwd: tmpdir(),
+      tools: [],
+      maxTurns: 1,
+      settingSources: [],
+      ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
+      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: "sciencedash/0.1" },
+    },
+  });
+
+  let resultText: string | null = null;
+  let costUsd: number | null = null;
+  let errorText: string | null = null;
+
+  for await (const msg of q) {
+    if (msg.type === "result") {
+      if (msg.subtype === "success") {
+        resultText = msg.result;
+        costUsd = msg.total_cost_usd;
+      } else {
+        errorText = `Claude Agent SDK: ${msg.subtype} (${(msg.errors ?? []).join("; ") || "no details"})`;
+      }
+      break;
+    }
+  }
+
+  if (errorText) throw new Error(errorText);
+  if (resultText == null)
+    throw new Error("Claude Agent SDK returned no result message");
+
+  return { text: resultText, costUsd };
+}
+
+/**
  * Extract the first balanced JSON object from model output. Models occasionally
  * add a markdown fence, leading prose, or a trailing explanation — we strip
  * both and walk the brace stack to pull just the object. As a last resort we
