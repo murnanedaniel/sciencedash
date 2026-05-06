@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to a branch supersedes any in-flight run for that branch —
+# we only care about the freshest commit, especially since the auto-deploy
+# poller queries CI status by SHA.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    # Build-time dummy values for env vars that lib/auth.ts reads. Real
+    # values live in homebox .env at runtime — never in CI.
+    env:
+      DATABASE_URL: "file:./.tmp.db"
+      SCIENCEDASH_SESSION_SECRET: "ci-dummy-session-secret"
+      SCIENCEDASH_AUTH_TOKEN: "ci-dummy-auth-token"
+      SCIENCEDASH_PASSWORD_SALT: "ci-dummy-salt"
+      # sha256("x" + "ci-dummy-salt") — never used (login is gated by the
+      # proxy, not exercised in build), but readSecret() needs a non-empty
+      # value at module load.
+      SCIENCEDASH_AUTH_PASSWORD_HASH: "0000000000000000000000000000000000000000000000000000000000000000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npx next build
