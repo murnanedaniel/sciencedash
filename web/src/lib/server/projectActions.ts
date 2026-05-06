@@ -102,6 +102,11 @@ export async function setProjectStatus(
 ): Promise<StatusActionState> {
   const next = String(formData.get("status") ?? "") as ProjectStatus;
   const rationale = (String(formData.get("rationale") ?? "") || "").trim();
+  // The blockers textarea only renders when status=blocked is selected, so
+  // its absence in formData means "leave blockers untouched".
+  const blockersRaw = formData.get("blockers");
+  const blockersField =
+    blockersRaw == null ? undefined : String(blockersRaw).trim();
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -126,9 +131,15 @@ export async function setProjectStatus(
     }
   }
 
+  const updateData: { status: ProjectStatus; blockers?: string | null } = {
+    status: next,
+  };
+  if (next === "blocked" && blockersField !== undefined) {
+    updateData.blockers = blockersField.length ? blockersField : null;
+  }
   await prisma.project.update({
     where: { id: projectId },
-    data: { status: next },
+    data: updateData,
   });
 
   const kind =
@@ -142,12 +153,20 @@ export async function setProjectStatus(
             ? "narrow"
             : "other";
 
+  // When transitioning to blocked, prefer the blocker text as the decision
+  // rationale — it's the most specific "why" we have.
+  const decisionRationale =
+    rationale ||
+    (next === "blocked" && blockersField
+      ? `blocked: ${blockersField}`
+      : `status: ${project.status} → ${next}`);
+
   await recordDecision({
     kind,
     subjectType: "Project",
     subjectId: projectId,
     projectId,
-    rationale: rationale || `status: ${project.status} → ${next}`,
+    rationale: decisionRationale,
   });
 
   revalidatePath(`/projects/${projectId}`);

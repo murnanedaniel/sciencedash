@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ProjectStatus } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseTags } from "@/lib/tags";
+import { StatusBadge } from "@/components/StatusBadge";
 
 function formatUtc(date: Date): string {
   return new Intl.DateTimeFormat("en-GB", {
@@ -296,7 +297,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
                 >
                   <div className="cardTitleRow">
                     <h2 className="cardTitle">{p.title}</h2>
-                    <span className="pill pillMuted">{p.status}</span>
+                    <StatusBadge status={p.status} blockers={p.blockers ?? null} />
                   </div>
                   <div className="muted small">
                     Updated {formatUtc(p.updatedAt)} UTC

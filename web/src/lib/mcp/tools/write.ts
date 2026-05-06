@@ -570,6 +570,50 @@ const updateProjectFields: ToolDefinition = {
   },
 };
 
+const setProjectBlocker: ToolDefinition = {
+  name: "set_project_blocker",
+  description:
+    "Mark a project as blocked (or unblocked) with a free-text reason. Setting a non-empty `blockers` reason flips status to 'blocked' atomically; passing an empty string clears the reason but does NOT auto-unblock — the user picks the next status manually. The brain heartbeat skips blocked projects, so this is the right tool when a project is waiting on something external (collaborators, hardware, external review) that the user shouldn't be nagged about.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string" },
+      blockers: {
+        type: "string",
+        description:
+          "What's blocking the project. Empty string clears the reason. Omit to leave the existing reason untouched.",
+      },
+    },
+    required: ["projectId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = requireString(args, "projectId");
+    const blockersArg = (args as { blockers?: unknown }).blockers;
+    const data: { blockers?: string | null; status?: "blocked" } = {};
+    if (typeof blockersArg === "string") {
+      const trimmed = blockersArg.trim();
+      data.blockers = trimmed.length ? trimmed : null;
+      // Setting a non-empty reason implies the project is now blocked.
+      // Clearing the reason is purely informational — leave status alone.
+      if (trimmed.length) data.status = "blocked";
+    } else {
+      // No blockers field provided — assume caller just wants status flip.
+      data.status = "blocked";
+    }
+    const project = await prisma.project.update({
+      where: { id: projectId },
+      data,
+      select: { id: true, status: true, blockers: true },
+    });
+    return jsonResult({
+      id: project.id,
+      status: project.status,
+      blockers: project.blockers,
+    });
+  },
+};
+
 export const writeTools: ToolDefinition[] = [
   createCheckIn,
   recordDecision,
@@ -577,6 +621,7 @@ export const writeTools: ToolDefinition[] = [
   updateHypothesisStatus,
   moveRunToHypothesis,
   updateProjectFields,
+  setProjectBlocker,
   postMessage,
   markMessageRead,
   queueDirective,

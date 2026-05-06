@@ -36,6 +36,7 @@ import { RunAiReviewButton } from "@/components/RunAiReviewButton";
 import { ParetoScatter } from "@/components/ParetoScatter";
 import { TagChips } from "@/components/TagChips";
 import { StatusForm } from "@/components/StatusForm";
+import { StatusBadge } from "@/components/StatusBadge";
 import { QuickstartButton } from "@/components/QuickstartModal";
 import { LitReviewButton } from "@/components/LitReviewButton";
 import { WorkhorsesPanel } from "@/components/WorkhorsesPanel";
@@ -153,7 +154,7 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
             />
           </div>
           <div className="rowWrap">
-            <span className="pill pillMuted">{project.status}</span>
+            <StatusBadge status={project.status} blockers={project.blockers ?? null} />
             {project.tags && project.tags.length > 0 ? (
               <>
                 {project.tags.slice(0, 4).map((t) => (
@@ -242,6 +243,7 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
               <StatusForm
                 action={setProjectStatus.bind(null, project.id)}
                 currentStatus={project.status}
+                currentBlockers={project.blockers ?? null}
                 statusOptions={Object.values(ProjectStatus)}
               />
               <p className="muted small" style={{ marginTop: 8 }}>

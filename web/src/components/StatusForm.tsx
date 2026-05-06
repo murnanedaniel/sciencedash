@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { ProjectStatus } from "@/generated/prisma/client";
 import type { StatusActionState } from "@/lib/server/projectActions";
 
@@ -10,6 +10,7 @@ type Props = {
     formData: FormData,
   ) => Promise<StatusActionState>;
   currentStatus: ProjectStatus;
+  currentBlockers: string | null;
   statusOptions: ProjectStatus[];
 };
 
@@ -18,12 +19,23 @@ type Props = {
  * the server action returns `{ ok: false, missing, rationale }` instead of
  * redirecting — so the page never reloads and anything typed into OTHER
  * inputs on the page is preserved. The alert renders inline.
+ *
+ * When the user picks "blocked", a textarea for the blocker reason
+ * appears and is persisted alongside the status change.
  */
-export function StatusForm({ action, currentStatus, statusOptions }: Props) {
+export function StatusForm({
+  action,
+  currentStatus,
+  currentBlockers,
+  statusOptions,
+}: Props) {
   const [state, formAction, pending] = useActionState<
     StatusActionState | null,
     FormData
   >(action, null);
+  const [selected, setSelected] = useState<ProjectStatus>(
+    state && state.ok === false ? state.attempted : currentStatus,
+  );
 
   const gate = state && state.ok === false ? state : null;
 
@@ -51,8 +63,8 @@ export function StatusForm({ action, currentStatus, statusOptions }: Props) {
           <select
             id="status"
             name="status"
-            defaultValue={gate?.attempted ?? currentStatus}
-            key={`status-${state && state.ok ? "committed" : "pending"}`}
+            value={selected}
+            onChange={(e) => setSelected(e.target.value as ProjectStatus)}
           >
             {statusOptions.map((v) => (
               <option key={v} value={v}>
@@ -75,6 +87,18 @@ export function StatusForm({ action, currentStatus, statusOptions }: Props) {
           {pending ? "…" : "Apply"}
         </button>
       </div>
+      {selected === "blocked" ? (
+        <div className="field">
+          <label htmlFor="blockers">What&apos;s blocking it?</label>
+          <textarea
+            id="blockers"
+            name="blockers"
+            rows={2}
+            defaultValue={currentBlockers ?? ""}
+            placeholder="e.g. waiting on collaborator X to send dataset Y"
+          />
+        </div>
+      ) : null}
     </form>
   );
 }
