@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { CopyButton } from "@/components/CopyButton";
+import { MarkdownBody } from "@/components/MarkdownBody";
 import { daysAgoLabel, formatUtc } from "@/lib/format";
 import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
 
@@ -131,16 +132,9 @@ export default async function BrainChatPage() {
                     </div>
                   </summary>
                   {c.summaryMd ? (
-                    <pre
-                      style={{
-                        whiteSpace: "pre-wrap",
-                        fontSize: 13,
-                        margin: "8px 0 0",
-                        fontFamily: "var(--font-display, system-ui)",
-                      }}
-                    >
-                      {c.summaryMd}
-                    </pre>
+                    <div style={{ marginTop: 8 }}>
+                      <MarkdownBody source={c.summaryMd} maxLines={6} maxChars={600} />
+                    </div>
                   ) : (
                     <p className="muted small" style={{ marginTop: 8 }}>
                       Summary pending — the next global brain heartbeat
@@ -154,18 +148,16 @@ export default async function BrainChatPage() {
                     >
                       transcript
                     </summary>
-                    <pre
+                    <div
                       style={{
-                        whiteSpace: "pre-wrap",
-                        fontSize: 12,
-                        margin: "8px 0 0",
+                        marginTop: 8,
                         background: "var(--card-muted, #f6f6f6)",
                         padding: 8,
                         borderRadius: 4,
                       }}
                     >
-                      {c.transcriptMd}
-                    </pre>
+                      <MarkdownBody source={c.transcriptMd} maxLines={20} maxChars={2000} />
+                    </div>
                   </details>
                 </details>
               ))}

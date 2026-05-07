@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { daysAgoLabel, relativeDays, formatUtc } from "@/lib/format";
 import { createCheckIn, applyProposedPatch } from "@/lib/server/checkInActions";
 import { DigestPanel } from "@/components/DigestPanel";
+import { MarkdownBody } from "@/components/MarkdownBody";
 
 export default async function TodayPage() {
   const projects = await prisma.project.findMany({
@@ -154,7 +155,9 @@ export default async function TodayPage() {
                     <time>
                       {formatUtc(c.createdAt)} · {c.project?.title ?? "(portfolio)"}
                     </time>
-                    <div style={{ marginTop: 4 }}>{c.bodyMd}</div>
+                    <div style={{ marginTop: 4 }}>
+                      <MarkdownBody source={c.bodyMd} maxLines={4} />
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -251,14 +254,28 @@ function AICheckInRow({ checkIn: c }: { checkIn: AiCheckIn }) {
       <time>
         {daysAgoLabel(c.createdAt)} · {c.project?.title ?? "(project)"} · AI
       </time>
-      {diagnosis ? <div style={{ marginTop: 4 }}><strong>Diagnosis:</strong> {diagnosis}</div> : null}
-      {recommendation ? (
+      {diagnosis ? (
         <div style={{ marginTop: 4 }}>
-          <strong>Recommendation:</strong> {recommendation}
+          <strong>Diagnosis:</strong>{" "}
+          <MarkdownBody source={diagnosis} maxLines={3} className="mdInline" />
         </div>
       ) : null}
-      {c.bodyMd ? <div style={{ marginTop: 6 }}>{c.bodyMd}</div> : null}
-      {rationale ? <div className="muted small" style={{ marginTop: 4 }}>{rationale}</div> : null}
+      {recommendation ? (
+        <div style={{ marginTop: 4 }}>
+          <strong>Recommendation:</strong>{" "}
+          <MarkdownBody source={recommendation} maxLines={3} className="mdInline" />
+        </div>
+      ) : null}
+      {c.bodyMd ? (
+        <div style={{ marginTop: 6 }}>
+          <MarkdownBody source={c.bodyMd} maxLines={4} />
+        </div>
+      ) : null}
+      {rationale ? (
+        <div className="muted small" style={{ marginTop: 4 }}>
+          <MarkdownBody source={rationale} maxLines={3} className="mdInline" />
+        </div>
+      ) : null}
       {patches.length ? (
         <div style={{ marginTop: 8 }}>
           <div className="muted small">Proposed patches</div>

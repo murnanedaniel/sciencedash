@@ -37,6 +37,7 @@ import { ParetoScatter } from "@/components/ParetoScatter";
 import { TagChips } from "@/components/TagChips";
 import { StatusForm } from "@/components/StatusForm";
 import { StatusBadge } from "@/components/StatusBadge";
+import { MarkdownBody } from "@/components/MarkdownBody";
 import { QuickstartButton } from "@/components/QuickstartModal";
 import { LitReviewButton } from "@/components/LitReviewButton";
 import { WorkhorsesPanel } from "@/components/WorkhorsesPanel";
@@ -906,8 +907,8 @@ async function FeedTab({ projectId }: { projectId: string }) {
                 <span className="pill" style={{ marginLeft: "auto" }}>unread</span>
               ) : null}
             </div>
-            <div style={{ marginTop: 8, whiteSpace: "pre-wrap", fontSize: 14 }}>
-              {m.body}
+            <div style={{ marginTop: 8, fontSize: 14 }}>
+              <MarkdownBody source={m.body} maxLines={4} />
             </div>
             {m.payloadJson ? (
               <details style={{ marginTop: 8 }}>
@@ -964,13 +965,21 @@ async function ActivityTab({ projectId }: { projectId: string }) {
     orderBy: { createdAt: "desc" },
     take: 200,
   });
-  type Row = { at: Date; kind: string; title: string; sub?: string };
+  type Row = {
+    at: Date;
+    kind: string;
+    title: string;
+    sub?: string;
+    /** When true, render `title` as markdown with collapse. */
+    markdown?: boolean;
+  };
   const rows: Row[] = [
     ...decisions.map((d) => ({
       at: d.at,
       kind: d.kind,
       title: d.rationale ?? d.kind,
       sub: `decision · ${d.subjectType}`,
+      markdown: !!d.rationale,
     })),
     ...runs.map((r) => ({
       at: r.endedAt ?? r.createdAt,
@@ -981,8 +990,9 @@ async function ActivityTab({ projectId }: { projectId: string }) {
     ...checkIns.map((c) => ({
       at: c.createdAt,
       kind: c.source === "ai" ? "ai-review" : "check-in",
-      title: c.bodyMd.slice(0, 240),
+      title: c.bodyMd,
       sub: c.source,
+      markdown: true,
     })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
@@ -998,7 +1008,13 @@ async function ActivityTab({ projectId }: { projectId: string }) {
           <div>
             <strong>{r.kind.replace("_", " ")}</strong>
             {r.sub ? <span className="muted small"> · {r.sub}</span> : null}
-            <div style={{ marginTop: 4 }}>{r.title}</div>
+            <div style={{ marginTop: 4 }}>
+              {r.markdown ? (
+                <MarkdownBody source={r.title} maxLines={3} />
+              ) : (
+                r.title
+              )}
+            </div>
           </div>
         </div>
       ))}
