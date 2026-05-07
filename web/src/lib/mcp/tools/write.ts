@@ -658,6 +658,240 @@ const submitBrainChat: ToolDefinition = {
   },
 };
 
+const createProgramme: ToolDefinition = {
+  name: "create_programme",
+  description:
+    "Create a new Programme — a coordinated cluster of projects sharing a publication strategy (e.g. 'ColliderML tracking', 'Foundation-model ingredients'). Programmes are the top-level container; projects roll up into them. Before calling, list_projects/list_programmes to make sure you're not duplicating an existing programme — Programme.name has a unique constraint and the call will error on collision. Returns the new programme id, which you can pass to create_project's programmeId or to attach_project_to_programme. Status defaults to 'active'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        description: "Short name (4–10 words). Must be unique across programmes.",
+      },
+      description: {
+        type: "string",
+        description: "One-paragraph description of the programme's thesis.",
+      },
+      targetVenues: {
+        type: "string",
+        description:
+          "Free-text list of target venues (e.g. 'NeurIPS 2026, ICML 2026, JINST').",
+      },
+      figuresOfMerit: {
+        type: "string",
+        description:
+          "What the programme is optimising for, written in evaluable terms.",
+      },
+    },
+    required: ["name"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const name = requireString(args, "name");
+    const description = optString(args, "description") ?? null;
+    const targetVenues = optString(args, "targetVenues") ?? null;
+    const figuresOfMerit = optString(args, "figuresOfMerit") ?? null;
+    try {
+      const programme = await prisma.programme.create({
+        data: { name, description, targetVenues, figuresOfMerit },
+        select: { id: true, name: true, status: true, createdAt: true },
+      });
+      return jsonResult(programme);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("Unique") || msg.includes("UNIQUE")) {
+        throw new Error(
+          `another programme already has the name "${name}" — pick a different name or attach projects to the existing one`,
+        );
+      }
+      throw e;
+    }
+  },
+};
+
+const createProject: ToolDefinition = {
+  name: "create_project",
+  description:
+    "Create a new Project. Defaults to status='idea' — promotion to 'active' goes through the §16.1 promotion gate (requires hypothesis + figures of merit + at least one primary metric defined), separately from create. Before calling, list_projects to avoid duplicates. Pass `programmeId` to slot the project under an existing programme; pass `tags` (array of strings) to apply tag labels. Tags are auto-created on first use. Returns the new project id.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: {
+        type: "string",
+        description:
+          "Short title (5–15 words). What's the one sentence that names this project?",
+      },
+      description: {
+        type: "string",
+        description: "One-paragraph description of the project.",
+      },
+      hypothesis: {
+        type: "string",
+        description: "The §16.1 hypothesis — 'if X then Y because Z'.",
+      },
+      programmeId: {
+        type: "string",
+        description:
+          "Optional Programme id to attach this project to. Null/omitted = unprogrammed.",
+      },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional tag labels to apply (e.g. ['exploit', 'tracking']). Tags are connectOrCreate'd by name.",
+      },
+    },
+    required: ["title"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const title = requireString(args, "title");
+    const description = optString(args, "description") ?? null;
+    const hypothesis = optString(args, "hypothesis") ?? null;
+    const programmeId = optString(args, "programmeId") ?? null;
+    const rawTags = (args as { tags?: unknown }).tags;
+    const tags = Array.isArray(rawTags)
+      ? rawTags.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+      : [];
+
+    if (programmeId) {
+      const exists = await prisma.programme.findUnique({
+        where: { id: programmeId },
+        select: { id: true },
+      });
+      if (!exists) {
+        throw new Error(`no programme with id "${programmeId}"`);
+      }
+    }
+
+    const project = await prisma.project.create({
+      data: {
+        title,
+        description,
+        hypothesis,
+        programmeId,
+        tags: tags.length
+          ? {
+              connectOrCreate: tags.map((name) => ({
+                where: { name },
+                create: { name },
+              })),
+            }
+          : undefined,
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        programmeId: true,
+        createdAt: true,
+      },
+    });
+    return jsonResult(project);
+  },
+};
+
+const attachProjectToProgramme: ToolDefinition = {
+  name: "attach_project_to_programme",
+  description:
+    "Attach an existing project to an existing programme, or detach if `programmeId` is null/empty. Use this when the user wants to reorganise — e.g. 'move project X under programme Y' or 'detach X from its programme'. Returns the project's new programmeId.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string" },
+      programmeId: {
+        type: "string",
+        description:
+          "Programme id to attach to. Empty string or omitted = detach.",
+      },
+    },
+    required: ["projectId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = requireString(args, "projectId");
+    const programmeArg = optString(args, "programmeId");
+    const programmeId = programmeArg && programmeArg.length > 0 ? programmeArg : null;
+
+    if (programmeId) {
+      const exists = await prisma.programme.findUnique({
+        where: { id: programmeId },
+        select: { id: true },
+      });
+      if (!exists) {
+        throw new Error(`no programme with id "${programmeId}"`);
+      }
+    }
+
+    const project = await prisma.project.update({
+      where: { id: projectId },
+      data: { programmeId },
+      select: { id: true, title: true, programmeId: true },
+    });
+    return jsonResult(project);
+  },
+};
+
+const createHypothesis: ToolDefinition = {
+  name: "create_hypothesis",
+  description:
+    "Create a new Hypothesis under a project. Hypotheses are the unit of experimental work — each has its own runs and compute budget. Before calling, list_hypotheses for the project to avoid duplicates. computeBudgetGpuHours defaults to 10 if not provided; the brain heartbeat surfaces budget escalations when actuals exceed budget. Returns the new hypothesis id. Status defaults to 'active', verdict defaults to 'pending'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string" },
+      title: {
+        type: "string",
+        description:
+          "Short title (5–12 words). E.g. 'block-sparse attention helps tracking'.",
+      },
+      statement: {
+        type: "string",
+        description: "Optional fuller statement: 'if X then Y because Z'.",
+      },
+      computeBudgetGpuHours: {
+        type: "number",
+        description: "GPU-hour budget. Default 10.",
+      },
+    },
+    required: ["projectId", "title"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = requireString(args, "projectId");
+    const title = requireString(args, "title");
+    const statement = optString(args, "statement") ?? null;
+    const budgetArg = (args as { computeBudgetGpuHours?: unknown }).computeBudgetGpuHours;
+    const computeBudgetGpuHours =
+      typeof budgetArg === "number" && Number.isFinite(budgetArg) && budgetArg > 0
+        ? budgetArg
+        : 10;
+
+    const exists = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new Error(`no project with id "${projectId}"`);
+    }
+
+    const hypothesis = await prisma.hypothesis.create({
+      data: { projectId, title, statement, computeBudgetGpuHours },
+      select: {
+        id: true,
+        projectId: true,
+        title: true,
+        status: true,
+        verdict: true,
+        computeBudgetGpuHours: true,
+        createdAt: true,
+      },
+    });
+    return jsonResult(hypothesis);
+  },
+};
+
 export const writeTools: ToolDefinition[] = [
   createCheckIn,
   recordDecision,
@@ -671,4 +905,8 @@ export const writeTools: ToolDefinition[] = [
   queueDirective,
   dispatchWorkhorse,
   submitBrainChat,
+  createProgramme,
+  createProject,
+  attachProjectToProgramme,
+  createHypothesis,
 ];
