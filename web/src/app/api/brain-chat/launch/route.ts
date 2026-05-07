@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildBrainChatContext } from "@/lib/brain/chat-context";
 import { buildMcpServerConfig } from "@/lib/brain/mcp-client";
 import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
+import { BRAIN_CHAT_SKILLS } from "@/lib/brain/skills";
 
 export const dynamic = "force-dynamic";
 
@@ -53,9 +54,19 @@ export async function GET(req: NextRequest) {
     2,
   );
 
-  // Single-quoted heredoc terminators ('SDMCP_EOF', 'SDCTX_EOF') prevent
-  // shell expansion inside the file bodies — token characters, $, and
-  // backticks are all safe.
+  // Single-quoted heredoc terminators ('SDMCP_EOF', 'SDCTX_EOF',
+  // 'SDSKILL_EOF') prevent shell expansion inside the file bodies —
+  // token characters, $, and backticks are all safe.
+  const skillBlocks: string[] = [];
+  for (const skill of BRAIN_CHAT_SKILLS) {
+    skillBlocks.push(
+      `mkdir -p "$WORKSPACE/.claude/skills/${skill.name}"`,
+      `cat > "$WORKSPACE/.claude/skills/${skill.name}/${skill.filename}" <<'SDSKILL_EOF'`,
+      skill.body,
+      "SDSKILL_EOF",
+    );
+  }
+
   const script = [
     "#!/usr/bin/env bash",
     "set -euo pipefail",
@@ -71,6 +82,9 @@ export async function GET(req: NextRequest) {
     "cat > \"$WORKSPACE/CHAT_CONTEXT.md\" <<'SDCTX_EOF'",
     primer,
     "SDCTX_EOF",
+    "",
+    "# Skills — recipes Claude Code will auto-discover from .claude/skills/.",
+    ...skillBlocks,
     "",
     "cd \"$WORKSPACE\"",
     "if ! command -v claude >/dev/null 2>&1; then",

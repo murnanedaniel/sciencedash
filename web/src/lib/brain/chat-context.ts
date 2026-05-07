@@ -129,6 +129,18 @@ export async function buildBrainChatContext(): Promise<string> {
     "- Workhorse / chat: `dispatch_workhorse(...)`, `queue_directive(...)`,",
     "  `submit_brain_chat(title, transcriptMd, summaryMd?)`.",
     "",
+    "## Skills",
+    "",
+    "Three workspace skills are available for common requests — invoke them",
+    "when the user's intent matches their description:",
+    "- `weekly-review` — past-7-day digest across active projects.",
+    "- `triage-feed` — walk through unread agent messages, mark-read with rationale.",
+    "- `health-check` — flag overspent budgets, stale repos, dead workhorses,",
+    "  missing primary metrics across the active portfolio.",
+    "",
+    "Skills are recipes — they tell you which MCP tools to call and in what order.",
+    "Compose them with the atoms above when the request doesn't fit a skill.",
+    "",
   );
 
   parts.push("## Programmes", "");
