@@ -28,8 +28,14 @@ export default async function BrainChatPage() {
 
   const tokenPresent = token.length > 0;
   const launchUrl = `${dashboardOrigin}/api/brain-chat/launch`;
-  const oneLiner = `curl -fsSL -H "Authorization: Bearer ${token}" ${launchUrl} | bash`;
-  const aliasLine = `alias brain='curl -fsSL -H "Authorization: Bearer ${token}" ${launchUrl} | bash'`;
+  // Use bash process substitution `bash <(curl ...)` rather than the more
+  // familiar `curl ... | bash`. The pipe form gives bash no controlling
+  // TTY (stdin is the pipe), so tmux fails with "open terminal failed:
+  // not a terminal". Process substitution preserves the user's TTY on
+  // stdin while reading the script from a /dev/fd/N — tmux gets a real
+  // terminal and the chat session opens cleanly.
+  const oneLiner = `bash <(curl -fsSL -H "Authorization: Bearer ${token}" ${launchUrl})`;
+  const aliasLine = `alias brain='bash <(curl -fsSL -H "Authorization: Bearer ${token}" ${launchUrl})'`;
   const attachLine = "tmux attach -t sd-brain";
 
   return (
