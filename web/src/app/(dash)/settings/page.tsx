@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { formatUtc, daysAgoLabel } from "@/lib/format";
 import { RunJobButton } from "@/components/RunJobButton";
 import { CopyButton } from "@/components/CopyButton";
+import { DeployStatusWidget } from "@/components/DeployStatusWidget";
 import {
   upsertPromptTemplate,
   resetPromptTemplate,
@@ -146,6 +147,8 @@ export default async function SettingsPage() {
       </header>
 
       <div className="stack">
+        <DeployStatusWidget />
+
         {/* Integrations */}
         <div className="card">
           <h2 className="sectionTitle">Integrations</h2>

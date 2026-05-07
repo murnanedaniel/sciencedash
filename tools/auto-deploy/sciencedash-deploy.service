@@ -1,0 +1,11 @@
+[Unit]
+Description=ScienceDash auto-deploy from origin/main (CI-gated)
+After=network-online.target
+
+[Service]
+Type=oneshot
+# %h expands to $HOME at runtime (e.g. /home/murnanedaniel)
+ExecStart=%h/Research/ScienceDash/tools/auto-deploy/deploy.sh
+# Ensure the script can find fnm / gh / claude when systemd runs us with
+# a thin PATH. The script also fixes PATH internally; this is belt+braces.
+Environment=PATH=%h/.local/share/fnm/aliases/default/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin

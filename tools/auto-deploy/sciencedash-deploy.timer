@@ -1,0 +1,17 @@
+[Unit]
+Description=ScienceDash auto-deploy poller (every 90s)
+
+[Timer]
+# First run 60s after the user logs in (or after `systemctl --user start`).
+OnBootSec=60
+# Subsequent runs 90s after the previous one finished — guarantees no
+# overlap even if a deploy takes longer than the interval.
+OnUnitActiveSec=90
+Unit=sciencedash-deploy.service
+# RandomizedDelaySec stops every homebox-class machine on the planet from
+# polling at the same epoch second; for a 1-machine deployment it's a
+# trivial nice-to-have, costs nothing.
+RandomizedDelaySec=10
+
+[Install]
+WantedBy=timers.target
