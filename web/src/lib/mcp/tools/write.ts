@@ -521,52 +521,215 @@ function safeParseJson(s: string): unknown {
   }
 }
 
-const updateProjectFields: ToolDefinition = {
-  name: "update_project_fields",
+/**
+ * Per-kind allow-lists of plain field updates for `update_entity`.
+ * State changes that need side effects (Hypothesis status/verdict →
+ * resolvedAt, Project status → blocker decision log) stay as their own
+ * behavioral tools (`update_hypothesis_status`, `set_project_blocker`).
+ */
+const UPDATABLE_FIELDS: Record<string, readonly string[]> = {
+  project: [
+    "description",
+    "hypothesis",
+    "figuresOfMerit",
+    "timeline",
+    "nextSteps",
+    "blockers",
+    "narrativeReadiness",
+    "narrativeReadinessNote",
+    "programmeId",
+  ],
+  programme: [
+    "name",
+    "description",
+    "targetVenues",
+    "figuresOfMerit",
+    "narrativeReadinessNote",
+    "status",
+  ],
+  hypothesis: ["title", "statement", "computeBudgetGpuHours"],
+  run: ["status", "notes", "computeGpuHours", "endedAt"],
+  note: [
+    "title",
+    "takeaway",
+    "summaryMd",
+    "authors",
+    "url",
+    "arxivId",
+  ],
+  paper: [
+    "title",
+    "status",
+    "abstract",
+    "venue",
+    "plannedVenue",
+    "arxivId",
+    "doi",
+  ],
+  metric_definition: [
+    "name",
+    "unit",
+    "direction",
+    "isPrimary",
+    "threshold",
+  ],
+};
+
+const PROGRAMME_STATUS = ["active", "parked"] as const;
+const RUN_STATUS = ["queued", "running", "done", "failed"] as const;
+const PAPER_STATUS = [
+  "skeleton",
+  "draft",
+  "internal",
+  "arxiv",
+  "submitted",
+  "published",
+] as const;
+const METRIC_DIRECTION = ["higher", "lower"] as const;
+
+const updateEntity: ToolDefinition = {
+  name: "update_entity",
   description:
-    "Patch one or more project-level fields directly (no human review). Use for project state your Claude is authoritative on — timeline updates, blockers, nextSteps, figuresOfMerit, hypothesis, narrativeReadiness, etc. For changes that should land only with human approval, attach `proposedPatches` to a `create_check_in` call instead. Patchable fields: " +
-    PROJECT_PATCHABLE_FIELDS.join(", ") +
-    ".",
+    "Patch plain fields on any ScienceDash row. State changes that require side effects stay in dedicated tools — flip a hypothesis status with `update_hypothesis_status` (sets resolvedAt), flip a project to blocked with `set_project_blocker` (also writes the reason + a Decision). Per-kind writable fields:\n" +
+    "- project: description, hypothesis, figuresOfMerit, timeline, nextSteps, blockers, narrativeReadiness, narrativeReadinessNote, programmeId\n" +
+    "- programme: name, description, targetVenues, figuresOfMerit, narrativeReadinessNote, status (active|parked)\n" +
+    "- hypothesis: title, statement, computeBudgetGpuHours\n" +
+    "- run: status (queued|running|done|failed), notes, computeGpuHours, endedAt (ISO)\n" +
+    "- note: title, takeaway, summaryMd, authors, url, arxivId\n" +
+    "- paper: title, status (skeleton|draft|internal|arxiv|submitted|published), abstract, venue, plannedVenue, arxivId, doi\n" +
+    "- metric_definition: name, unit, direction (higher|lower), isPrimary (boolean), threshold (number)\n" +
+    "Pass `patch` as an object with only the fields you want to change. Empty string clears string fields where nullable; null also clears.",
   inputSchema: {
     type: "object",
     properties: {
-      projectId: { type: "string" },
-      description: { type: "string" },
-      hypothesis: { type: "string" },
-      figuresOfMerit: { type: "string" },
-      timeline: { type: "string" },
-      nextSteps: { type: "string" },
-      blockers: { type: "string" },
-      narrativeReadiness: { type: "string", enum: [...NARRATIVE_READINESS] },
-      narrativeReadinessNote: { type: "string" },
+      kind: {
+        type: "string",
+        enum: Object.keys(UPDATABLE_FIELDS),
+      },
+      id: { type: "string" },
+      patch: {
+        type: "object",
+        description:
+          "Object of field → new value. See per-kind cheatsheet in the description.",
+      },
     },
-    required: ["projectId"],
+    required: ["kind", "id", "patch"],
     additionalProperties: false,
   },
   async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const data: Record<string, unknown> = {};
-    for (const f of PROJECT_PATCHABLE_FIELDS) {
-      const v = optString(args, f);
-      if (v !== undefined) data[f] = v;
+    const kind = requireString(args, "kind");
+    const id = requireString(args, "id");
+    const patchArg = (args as { patch?: unknown }).patch;
+    if (!patchArg || typeof patchArg !== "object" || Array.isArray(patchArg)) {
+      throw new Error("patch must be an object");
     }
-    if (data.narrativeReadiness !== undefined) {
-      const v = data.narrativeReadiness as string;
+    const allowed = UPDATABLE_FIELDS[kind];
+    if (!allowed) {
+      throw new Error(
+        `update_entity does not support kind=${kind}; valid: ${Object.keys(UPDATABLE_FIELDS).join(", ")}`,
+      );
+    }
+    const patch = patchArg as Record<string, unknown>;
+    const data: Record<string, unknown> = {};
+    for (const f of allowed) {
+      if (!(f in patch)) continue;
+      data[f] = patch[f];
+    }
+    if (Object.keys(data).length === 0) {
+      throw new Error(
+        `patch must contain at least one of: ${allowed.join(", ")}`,
+      );
+    }
+
+    // Per-kind enum validation + type coercions.
+    if (kind === "project" && data.narrativeReadiness !== undefined) {
+      const v = String(data.narrativeReadiness);
       if (!NARRATIVE_READINESS.includes(v as (typeof NARRATIVE_READINESS)[number])) {
         throw new Error(
           `narrativeReadiness must be one of: ${NARRATIVE_READINESS.join(", ")}; got ${v}`,
         );
       }
     }
-    if (Object.keys(data).length === 0) {
-      throw new Error("at least one patchable field must be provided");
+    if (kind === "programme" && data.status !== undefined) {
+      const v = String(data.status);
+      if (!PROGRAMME_STATUS.includes(v as (typeof PROGRAMME_STATUS)[number])) {
+        throw new Error(
+          `programme status must be one of: ${PROGRAMME_STATUS.join(", ")}; got ${v}`,
+        );
+      }
     }
-    const project = await prisma.project.update({
-      where: { id: projectId },
-      data,
-      select: { id: true },
-    });
-    return jsonResult({ id: project.id, patched: Object.keys(data) });
+    if (kind === "run" && data.status !== undefined) {
+      const v = String(data.status);
+      if (!RUN_STATUS.includes(v as (typeof RUN_STATUS)[number])) {
+        throw new Error(`run status must be one of: ${RUN_STATUS.join(", ")}; got ${v}`);
+      }
+    }
+    if (kind === "run" && data.endedAt !== undefined && data.endedAt !== null) {
+      data.endedAt = new Date(String(data.endedAt));
+    }
+    if (kind === "paper" && data.status !== undefined) {
+      const v = String(data.status);
+      if (!PAPER_STATUS.includes(v as (typeof PAPER_STATUS)[number])) {
+        throw new Error(`paper status must be one of: ${PAPER_STATUS.join(", ")}; got ${v}`);
+      }
+    }
+    if (kind === "metric_definition" && data.direction !== undefined) {
+      const v = String(data.direction);
+      if (!METRIC_DIRECTION.includes(v as (typeof METRIC_DIRECTION)[number])) {
+        throw new Error(
+          `metric direction must be one of: ${METRIC_DIRECTION.join(", ")}; got ${v}`,
+        );
+      }
+    }
+
+    // Programme attachment validation (project.programmeId points at an
+    // existing programme).
+    if (kind === "project" && data.programmeId !== undefined && data.programmeId !== null) {
+      const exists = await prisma.programme.findUnique({
+        where: { id: String(data.programmeId) },
+        select: { id: true },
+      });
+      if (!exists) throw new Error(`no programme with id "${String(data.programmeId)}"`);
+    }
+
+    // Empty-string normalisation for nullable text fields. Same rule
+    // patchProjectField uses on the server side: empty trim => null.
+    for (const [k, v] of Object.entries(data)) {
+      if (typeof v === "string" && v.trim() === "" && k !== "name" && k !== "title") {
+        data[k] = null;
+      }
+    }
+
+    const model = (
+      {
+        project: prisma.project,
+        programme: prisma.programme,
+        hypothesis: prisma.hypothesis,
+        run: prisma.run,
+        note: prisma.note,
+        paper: prisma.paper,
+        metric_definition: prisma.projectMetricDefinition,
+      } as const
+    )[kind as keyof typeof UPDATABLE_FIELDS];
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updated = await (model as any).update({
+        where: { id },
+        data,
+        select: { id: true },
+      });
+      return jsonResult({ id: updated.id, patched: Object.keys(data) });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("Unique") || msg.includes("UNIQUE")) {
+        throw new Error(`unique constraint violation: ${msg.slice(0, 200)}`);
+      }
+      if (msg.includes("Record to update not found")) {
+        throw new Error(`${kind} not found: ${id}`);
+      }
+      throw e;
+    }
   },
 };
 
@@ -892,13 +1055,197 @@ const createHypothesis: ToolDefinition = {
   },
 };
 
+const createPaper: ToolDefinition = {
+  name: "create_paper",
+  description:
+    "Create a new Paper, optionally tied to a project (primaryProjectId) and/or seeded from a hypothesis. Status defaults to 'skeleton'. Use this when the user wants to start a write-up. To attach hypotheses after creation, use update_entity on the HypothesisPaper join (not yet exposed) or do it via the dashboard.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      projectId: {
+        type: "string",
+        description:
+          "Optional project to set as primaryProject. The paper will appear on that project's page.",
+      },
+      status: {
+        type: "string",
+        enum: [...PAPER_STATUS],
+        description: "Defaults to 'skeleton'.",
+      },
+      abstract: { type: "string" },
+      plannedVenue: { type: "string" },
+    },
+    required: ["title"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const title = requireString(args, "title");
+    const projectId = optString(args, "projectId") ?? null;
+    const status =
+      (optString(args, "status") as (typeof PAPER_STATUS)[number] | undefined) ??
+      "skeleton";
+    if (!PAPER_STATUS.includes(status)) {
+      throw new Error(`status must be one of: ${PAPER_STATUS.join(", ")}`);
+    }
+    const abstract = optString(args, "abstract") ?? null;
+    const plannedVenue = optString(args, "plannedVenue") ?? null;
+
+    if (projectId) {
+      const exists = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { id: true },
+      });
+      if (!exists) throw new Error(`no project with id "${projectId}"`);
+    }
+
+    const paper = await prisma.paper.create({
+      data: {
+        title,
+        status,
+        abstract,
+        plannedVenue,
+        primaryProjectId: projectId,
+      },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        primaryProjectId: true,
+        createdAt: true,
+      },
+    });
+    return jsonResult(paper);
+  },
+};
+
+const createMetricDefinition: ToolDefinition = {
+  name: "create_metric_definition",
+  description:
+    "Create a metric definition on a project — a named, directional, optionally-thresholded number that runs report values for. Required for the §16.1 promotion gate (idea → active needs at least one primary metric). If you pass isPrimary=true, any existing primary metric on the project is demoted automatically.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string" },
+      name: {
+        type: "string",
+        description: "e.g. 'tracking efficiency', 'AUC', 'inference latency ms'.",
+      },
+      unit: { type: "string", description: "e.g. '%', 'ms', 'GB'. Optional." },
+      direction: {
+        type: "string",
+        enum: [...METRIC_DIRECTION],
+        description: "higher = bigger is better, lower = smaller is better. Default 'higher'.",
+      },
+      isPrimary: {
+        type: "boolean",
+        description:
+          "If true, this metric becomes the project's primary metric (demoting any existing one).",
+      },
+      threshold: {
+        type: "number",
+        description: "Optional success threshold; runs hitting this are 'green'.",
+      },
+    },
+    required: ["projectId", "name"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = requireString(args, "projectId");
+    const name = requireString(args, "name");
+    const unit = optString(args, "unit") ?? null;
+    const direction =
+      (optString(args, "direction") as (typeof METRIC_DIRECTION)[number] | undefined) ??
+      "higher";
+    if (!METRIC_DIRECTION.includes(direction)) {
+      throw new Error(`direction must be one of: ${METRIC_DIRECTION.join(", ")}`);
+    }
+    const isPrimary = (args as { isPrimary?: unknown }).isPrimary === true;
+    const thresholdArg = (args as { threshold?: unknown }).threshold;
+    const threshold =
+      typeof thresholdArg === "number" && Number.isFinite(thresholdArg)
+        ? thresholdArg
+        : null;
+
+    const exists = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!exists) throw new Error(`no project with id "${projectId}"`);
+
+    if (isPrimary) {
+      await prisma.projectMetricDefinition.updateMany({
+        where: { projectId, isPrimary: true },
+        data: { isPrimary: false },
+      });
+    }
+    const def = await prisma.projectMetricDefinition.create({
+      data: { projectId, name, unit, direction, isPrimary, threshold },
+      select: {
+        id: true,
+        projectId: true,
+        name: true,
+        unit: true,
+        direction: true,
+        isPrimary: true,
+        threshold: true,
+      },
+    });
+    return jsonResult(def);
+  },
+};
+
+const refreshRepo: ToolDefinition = {
+  name: "refresh_repo",
+  description:
+    "Force a fresh GitHub commit-state pull for a project's RepoLink(s). Updates `cachedLastCommitSha` / `cachedLastCommitAt` and logs a JobRun(kind='github_pull') per link. Use when the brain wants to see the very latest commit, not whatever the background worker has cached. Pass `repoLinkId` to refresh just one link, or `projectId` alone to refresh all of that project's repos. Requires GITHUB_PAT in server env.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string" },
+      repoLinkId: { type: "string" },
+    },
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = optString(args, "projectId");
+    const repoLinkId = optString(args, "repoLinkId");
+    if (!projectId && !repoLinkId) {
+      throw new Error("refresh_repo requires projectId or repoLinkId");
+    }
+
+    const { pullOneRepoLink } = await import("@/lib/ingest/github");
+
+    const ids: string[] = [];
+    if (repoLinkId) {
+      ids.push(repoLinkId);
+    } else if (projectId) {
+      const links = await prisma.repoLink.findMany({
+        where: { projectId },
+        select: { id: true },
+      });
+      ids.push(...links.map((l) => l.id));
+    }
+    if (ids.length === 0) {
+      return jsonResult({ refreshed: [], note: "no RepoLinks found for that scope" });
+    }
+
+    const results = [];
+    for (const id of ids) {
+      const r = await pullOneRepoLink(id);
+      results.push({ repoLinkId: id, ...(r ?? { ok: false, error: "not found" }) });
+    }
+    return jsonResult({ refreshed: results });
+  },
+};
+
 export const writeTools: ToolDefinition[] = [
   createCheckIn,
   recordDecision,
   addNote,
   updateHypothesisStatus,
   moveRunToHypothesis,
-  updateProjectFields,
+  updateEntity,
   setProjectBlocker,
   postMessage,
   markMessageRead,
@@ -909,4 +1256,7 @@ export const writeTools: ToolDefinition[] = [
   createProject,
   attachProjectToProgramme,
   createHypothesis,
+  createPaper,
+  createMetricDefinition,
+  refreshRepo,
 ];
