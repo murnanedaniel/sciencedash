@@ -1,8 +1,13 @@
 /**
  * Read tools — non-mutating queries against the ScienceDash DB.
  *
- * Tone of descriptions: imperative, scientific. Claude reads these to
- * decide when to invoke; vague descriptions = wasted tool calls.
+ * Two tools cover every entity the brain might want to read:
+ *   - `query_entity(kind, ...)` — list rows of any kind, with per-kind filters.
+ *   - `get_entity(kind, id)` — fetch one row by id with deeper detail.
+ *
+ * Per-kind filter shapes are documented in the tool description (Claude
+ * reads them to decide what to pass). The flat shape keeps tool calls
+ * easy to fill out without nested objects.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -14,457 +19,749 @@ import {
 } from "@/lib/mcp/server";
 import type { ToolDefinition } from "@/lib/mcp/types";
 
-const STATUS_VALUES = ["idea", "active", "blocked", "shipped", "parked"] as const;
-const NOTE_KIND_VALUES = ["paper", "book", "talk", "thread", "other"] as const;
+const ENTITY_KINDS = [
+  "project",
+  "programme",
+  "run",
+  "hypothesis",
+  "note",
+  "decision",
+  "check_in",
+  "message",
+  "workhorse",
+  "brain_chat",
+  "job",
+  "repo_link",
+  "paper",
+  "tag",
+  "metric_definition",
+] as const;
+type EntityKind = (typeof ENTITY_KINDS)[number];
 
-const listProjects: ToolDefinition = {
-  name: "list_projects",
+/* --------------------------- query_entity --------------------------- */
+
+const queryEntity: ToolDefinition = {
+  name: "query_entity",
   description:
-    "List ScienceDash projects, optionally filtered by status. Returns id, title, status, updatedAt, and tag names.",
+    "List rows of any ScienceDash entity, newest first. Pass `kind` plus any applicable filters; unused filters are ignored. Default limit is 50 (most kinds). Per-kind filter cheatsheet:\n" +
+    "- project: status?, programmeId?, tag?, since?\n" +
+    "- programme: status?, since?\n" +
+    "- run: projectId* OR hypothesisId*, status?, since?\n" +
+    "- hypothesis: projectId*, status?, verdict?\n" +
+    "- note: projectId*, kind? (paper|book|talk|thread|other)\n" +
+    "- decision: projectId*, kind?, since?\n" +
+    "- check_in: projectId*, source?, since?\n" +
+    "- message: projectId?, unreadOnly?, severity?, source?, kind?, since?\n" +
+    "- workhorse: projectId?\n" +
+    "- brain_chat: summarised? (boolean), since?\n" +
+    "- job: projectId?, kind?, ok?, since?\n" +
+    "- repo_link: projectId?\n" +
+    "- paper: projectId?, status?, since?\n" +
+    "- tag: (no filters; returns all tags by usage count)\n" +
+    "- metric_definition: projectId*, isPrimary?\n" +
+    "Asterisks mark required scoping for that kind. `since` is ISO-8601.",
   inputSchema: {
     type: "object",
     properties: {
-      status: {
-        type: "string",
-        enum: STATUS_VALUES,
-        description: "Filter to a single project status.",
-      },
-      limit: {
-        type: "number",
-        description: "Max projects to return (default 50).",
-      },
-    },
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const status = optString(args, "status") as (typeof STATUS_VALUES)[number] | undefined;
-    const limit = optInt(args, "limit") ?? 50;
-    const projects = await prisma.project.findMany({
-      where: status ? { status } : undefined,
-      orderBy: { updatedAt: "desc" },
-      take: limit,
-      include: { tags: { select: { name: true } } },
-    });
-    return jsonResult(
-      projects.map((p) => ({
-        id: p.id,
-        title: p.title,
-        status: p.status,
-        updatedAt: p.updatedAt,
-        tags: p.tags.map((t) => t.name),
-      })),
-    );
-  },
-};
-
-const getProject: ToolDefinition = {
-  name: "get_project",
-  description:
-    "Fetch a single project's full state: title, status, hypothesis (text), description, primary metric, figures of merit, tags, narrative readiness, blockers, and counts of recent activity (runs, decisions, check-ins, notes).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      id: { type: "string", description: "Project id." },
-    },
-    required: ["id"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const id = requireString(args, "id");
-    const p = await prisma.project.findUnique({
-      where: { id },
-      include: {
-        tags: { select: { name: true } },
-        metricDefinitions: true,
-        repoLinks: true,
-        wandbSources: true,
-        _count: {
-          select: { hypotheses: true, decisions: true, checkIns: true, notes: true, papers: true },
-        },
-      },
-    });
-    if (!p) throw new Error(`project not found: ${id}`);
-    const primary = p.metricDefinitions.find((m) => m.isPrimary) ?? null;
-    return jsonResult({
-      id: p.id,
-      title: p.title,
-      status: p.status,
-      description: p.description,
-      hypothesis: p.hypothesis,
-      figuresOfMerit: p.figuresOfMerit,
-      timeline: p.timeline,
-      nextSteps: p.nextSteps,
-      narrativeReadiness: p.narrativeReadiness,
-      narrativeReadinessNote: p.narrativeReadinessNote,
-      blockers: p.blockers,
-      tags: p.tags.map((t) => t.name),
-      primaryMetric: primary
-        ? { name: primary.name, unit: primary.unit, direction: primary.direction, threshold: primary.threshold }
-        : null,
-      metricDefinitions: p.metricDefinitions.map((m) => ({
-        name: m.name,
-        unit: m.unit,
-        direction: m.direction,
-        isPrimary: m.isPrimary,
-        threshold: m.threshold,
-      })),
-      repoLinks: p.repoLinks.map((r) => ({ url: r.url, label: r.label })),
-      wandbSources: p.wandbSources.map((w) => ({ entity: w.entity, name: w.name })),
-      counts: p._count,
-      updatedAt: p.updatedAt,
-      createdAt: p.createdAt,
-    });
-  },
-};
-
-const listRuns: ToolDefinition = {
-  name: "list_runs",
-  description:
-    "List runs across all hypotheses of a project, newest first. Returns id, name, status, wandbRunId, startedAt, endedAt, computeGpuHours, and the hypothesis title.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      projectId: { type: "string" },
-      since: { type: "string", description: "ISO-8601 timestamp; only runs created after this." },
-      limit: { type: "number", description: "Max runs (default 50)." },
-    },
-    required: ["projectId"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const since = optString(args, "since");
-    const limit = optInt(args, "limit") ?? 50;
-    const runs = await prisma.run.findMany({
-      where: {
-        hypothesis: { projectId },
-        ...(since ? { createdAt: { gte: new Date(since) } } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      include: { hypothesis: { select: { title: true } } },
-    });
-    return jsonResult(
-      runs.map((r) => ({
-        id: r.id,
-        name: r.name,
-        status: r.status,
-        wandbRunId: r.wandbRunId,
-        startedAt: r.startedAt,
-        endedAt: r.endedAt,
-        computeGpuHours: r.computeGpuHours,
-        hypothesisTitle: r.hypothesis.title,
-        notes: r.notes,
-      })),
-    );
-  },
-};
-
-const summariseRun: ToolDefinition = {
-  name: "summarise_run",
-  description:
-    "Fetch a single run's full state including all logged metrics (name, value, direction, unit). Use this when you need to know whether a run hit its targets.",
-  inputSchema: {
-    type: "object",
-    properties: { runId: { type: "string" } },
-    required: ["runId"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const runId = requireString(args, "runId");
-    const r = await prisma.run.findUnique({
-      where: { id: runId },
-      include: {
-        hypothesis: { select: { id: true, title: true, projectId: true } },
-        metrics: { include: { definition: true } },
-        wandbSource: true,
-      },
-    });
-    if (!r) throw new Error(`run not found: ${runId}`);
-    return jsonResult({
-      id: r.id,
-      name: r.name,
-      status: r.status,
-      wandbRunId: r.wandbRunId,
-      wandbSource: r.wandbSource ? { entity: r.wandbSource.entity, name: r.wandbSource.name } : null,
-      startedAt: r.startedAt,
-      endedAt: r.endedAt,
-      computeGpuHours: r.computeGpuHours,
-      notes: r.notes,
-      hypothesis: r.hypothesis,
-      metrics: r.metrics.map((m) => ({
-        name: m.definition.name,
-        value: m.value,
-        unit: m.definition.unit,
-        direction: m.definition.direction,
-        threshold: m.definition.threshold,
-      })),
-    });
-  },
-};
-
-const listNotes: ToolDefinition = {
-  name: "list_notes",
-  description:
-    "List notes (papers, books, talks, threads, observations) linked to a project. Use kind=paper to get the literature reading list.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      projectId: { type: "string" },
       kind: {
         type: "string",
-        enum: NOTE_KIND_VALUES,
-        description: "Filter to a single note kind.",
+        enum: [...ENTITY_KINDS],
+        description: "Which entity to query.",
       },
-      limit: { type: "number" },
-    },
-    required: ["projectId"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const kind = optString(args, "kind") as (typeof NOTE_KIND_VALUES)[number] | undefined;
-    const limit = optInt(args, "limit") ?? 50;
-    const links = await prisma.noteProject.findMany({
-      where: { projectId, ...(kind ? { note: { kind } } : {}) },
-      orderBy: { note: { createdAt: "desc" } },
-      take: limit,
-      include: { note: true },
-    });
-    return jsonResult(
-      links.map((l) => ({
-        id: l.note.id,
-        kind: l.note.kind,
-        title: l.note.title,
-        authors: l.note.authors,
-        url: l.note.url,
-        arxivId: l.note.arxivId,
-        takeaway: l.note.takeaway,
-        summaryMd: l.note.summaryMd,
-        createdAt: l.note.createdAt,
-      })),
-    );
-  },
-};
-
-const listDecisions: ToolDefinition = {
-  name: "list_decisions",
-  description:
-    "List Decision rows for a project, newest first. Each Decision is a deliberate action recorded by the user or by an agent (promote, park, narrow, spawn_paper, resolve, retire, budget_escalate, paper_status_change, ai_patch_applied, other).",
-  inputSchema: {
-    type: "object",
-    properties: {
       projectId: { type: "string" },
-      kind: { type: "string", description: "Filter to a single DecisionKind value." },
-      limit: { type: "number" },
-    },
-    required: ["projectId"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const kind = optString(args, "kind");
-    const limit = optInt(args, "limit") ?? 50;
-    const decisions = await prisma.decision.findMany({
-      where: { projectId, ...(kind ? { kind: kind as never } : {}) },
-      orderBy: { at: "desc" },
-      take: limit,
-    });
-    return jsonResult(decisions);
-  },
-};
-
-const listCheckIns: ToolDefinition = {
-  name: "list_check_ins",
-  description:
-    "List CheckIn rows for a project, newest first. Each CheckIn is a short prose status update; sources include 'manual', agent ids, and 'ai_review'.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      projectId: { type: "string" },
+      programmeId: { type: "string" },
+      hypothesisId: { type: "string" },
+      status: { type: "string" },
+      verdict: { type: "string" },
+      kindFilter: {
+        type: "string",
+        description:
+          "Sub-kind filter (note kind, decision kind, message kind, job kind). Aliased from `kind` to avoid clashing with the entity kind.",
+      },
+      tag: { type: "string" },
+      source: { type: "string" },
+      severity: { type: "string" },
+      unreadOnly: { type: "boolean" },
+      isPrimary: { type: "boolean" },
+      summarised: { type: "boolean" },
+      ok: { type: "boolean" },
       since: { type: "string", description: "ISO-8601 timestamp." },
       limit: { type: "number" },
     },
-    required: ["projectId"],
+    required: ["kind"],
     additionalProperties: false,
   },
   async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const since = optString(args, "since");
+    const kind = requireString(args, "kind") as EntityKind;
+    if (!ENTITY_KINDS.includes(kind)) {
+      throw new Error(
+        `unknown kind: ${kind}; valid: ${ENTITY_KINDS.join(", ")}`,
+      );
+    }
     const limit = optInt(args, "limit") ?? 50;
-    const checkIns = await prisma.checkIn.findMany({
-      where: {
-        projectId,
-        ...(since ? { createdAt: { gte: new Date(since) } } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-    });
-    return jsonResult(
-      checkIns.map((c) => ({
-        id: c.id,
-        bodyMd: c.bodyMd,
-        scope: c.scope,
-        source: c.source,
-        createdAt: c.createdAt,
-        proposedPatchJson: c.proposedPatchJson,
-      })),
-    );
+    const projectId = optString(args, "projectId");
+    const programmeId = optString(args, "programmeId");
+    const hypothesisId = optString(args, "hypothesisId");
+    const status = optString(args, "status");
+    const verdict = optString(args, "verdict");
+    const subKind = optString(args, "kindFilter");
+    const tag = optString(args, "tag");
+    const source = optString(args, "source");
+    const severity = optString(args, "severity");
+    const unreadOnly = args.unreadOnly === true;
+    const isPrimary =
+      typeof args.isPrimary === "boolean" ? (args.isPrimary as boolean) : undefined;
+    const summarised =
+      typeof args.summarised === "boolean"
+        ? (args.summarised as boolean)
+        : undefined;
+    const ok =
+      typeof args.ok === "boolean" ? (args.ok as boolean) : undefined;
+    const sinceStr = optString(args, "since");
+    const since = sinceStr ? new Date(sinceStr) : undefined;
+
+    switch (kind) {
+      case "project": {
+        const projects = await prisma.project.findMany({
+          where: {
+            ...(status ? { status: status as never } : {}),
+            ...(programmeId ? { programmeId } : {}),
+            ...(tag ? { tags: { some: { name: tag } } } : {}),
+            ...(since ? { updatedAt: { gte: since } } : {}),
+          },
+          orderBy: { updatedAt: "desc" },
+          take: limit,
+          include: { tags: { select: { name: true } } },
+        });
+        return jsonResult(
+          projects.map((p) => ({
+            id: p.id,
+            title: p.title,
+            status: p.status,
+            programmeId: p.programmeId,
+            updatedAt: p.updatedAt,
+            tags: p.tags.map((t) => t.name),
+            blockers: p.blockers,
+          })),
+        );
+      }
+      case "programme": {
+        const programmes = await prisma.programme.findMany({
+          where: {
+            ...(status ? { status: status as never } : {}),
+            ...(since ? { updatedAt: { gte: since } } : {}),
+          },
+          orderBy: [{ status: "asc" }, { name: "asc" }],
+          take: limit,
+          include: { _count: { select: { projects: true } } },
+        });
+        return jsonResult(
+          programmes.map((pg) => ({
+            id: pg.id,
+            name: pg.name,
+            status: pg.status,
+            description: pg.description,
+            targetVenues: pg.targetVenues,
+            figuresOfMerit: pg.figuresOfMerit,
+            narrativeReadinessNote: pg.narrativeReadinessNote,
+            projectCount: pg._count.projects,
+            createdAt: pg.createdAt,
+            updatedAt: pg.updatedAt,
+          })),
+        );
+      }
+      case "run": {
+        if (!projectId && !hypothesisId) {
+          throw new Error("kind=run requires projectId or hypothesisId");
+        }
+        const runs = await prisma.run.findMany({
+          where: {
+            ...(hypothesisId ? { hypothesisId } : {}),
+            ...(projectId && !hypothesisId
+              ? { hypothesis: { projectId } }
+              : {}),
+            ...(status ? { status: status as never } : {}),
+            ...(since ? { createdAt: { gte: since } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          include: { hypothesis: { select: { title: true, projectId: true } } },
+        });
+        return jsonResult(
+          runs.map((r) => ({
+            id: r.id,
+            name: r.name,
+            status: r.status,
+            wandbRunId: r.wandbRunId,
+            startedAt: r.startedAt,
+            endedAt: r.endedAt,
+            computeGpuHours: r.computeGpuHours,
+            hypothesisId: r.hypothesisId,
+            hypothesisTitle: r.hypothesis.title,
+            projectId: r.hypothesis.projectId,
+            notes: r.notes,
+          })),
+        );
+      }
+      case "hypothesis": {
+        if (!projectId)
+          throw new Error("kind=hypothesis requires projectId");
+        const hyps = await prisma.hypothesis.findMany({
+          where: {
+            projectId,
+            ...(status ? { status: status as never } : {}),
+            ...(verdict ? { verdict: verdict as never } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          include: { _count: { select: { runs: true } } },
+        });
+        return jsonResult(
+          hyps.map((h) => ({
+            id: h.id,
+            title: h.title,
+            statement: h.statement,
+            status: h.status,
+            verdict: h.verdict,
+            computeBudgetGpuHours: h.computeBudgetGpuHours,
+            resolvedAt: h.resolvedAt,
+            runCount: h._count.runs,
+            createdAt: h.createdAt,
+          })),
+        );
+      }
+      case "note": {
+        if (!projectId) throw new Error("kind=note requires projectId");
+        const links = await prisma.noteProject.findMany({
+          where: {
+            projectId,
+            ...(subKind ? { note: { kind: subKind as never } } : {}),
+          },
+          orderBy: { note: { createdAt: "desc" } },
+          take: limit,
+          include: { note: true },
+        });
+        return jsonResult(
+          links.map((l) => ({
+            id: l.note.id,
+            kind: l.note.kind,
+            title: l.note.title,
+            authors: l.note.authors,
+            url: l.note.url,
+            arxivId: l.note.arxivId,
+            takeaway: l.note.takeaway,
+            summaryMd: l.note.summaryMd,
+            createdAt: l.note.createdAt,
+          })),
+        );
+      }
+      case "decision": {
+        if (!projectId) throw new Error("kind=decision requires projectId");
+        const decisions = await prisma.decision.findMany({
+          where: {
+            projectId,
+            ...(subKind ? { kind: subKind as never } : {}),
+            ...(since ? { at: { gte: since } } : {}),
+          },
+          orderBy: { at: "desc" },
+          take: limit,
+        });
+        return jsonResult(decisions);
+      }
+      case "check_in": {
+        if (!projectId) throw new Error("kind=check_in requires projectId");
+        const checkIns = await prisma.checkIn.findMany({
+          where: {
+            projectId,
+            ...(source ? { source } : {}),
+            ...(since ? { createdAt: { gte: since } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+        });
+        return jsonResult(
+          checkIns.map((c) => ({
+            id: c.id,
+            bodyMd: c.bodyMd,
+            scope: c.scope,
+            kind: c.kind,
+            source: c.source,
+            createdAt: c.createdAt,
+            proposedPatchJson: c.proposedPatchJson,
+          })),
+        );
+      }
+      case "message": {
+        const messages = await prisma.agentMessage.findMany({
+          where: {
+            ...(projectId ? { projectId } : {}),
+            ...(unreadOnly ? { readAt: null } : {}),
+            ...(severity ? { severity: severity as never } : {}),
+            ...(source ? { source } : {}),
+            ...(subKind ? { kind: subKind as never } : {}),
+            ...(since ? { createdAt: { gte: since } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          include: { project: { select: { id: true, title: true } } },
+        });
+        return jsonResult(messages);
+      }
+      case "workhorse": {
+        const workhorses = await prisma.workhorse.findMany({
+          where: { ...(projectId ? { projectId } : {}) },
+          orderBy: [{ projectId: "asc" }, { host: "asc" }],
+          take: limit,
+        });
+        const now = Date.now();
+        return jsonResult(
+          workhorses.map((w) => {
+            const tmuxAlive = parseTmuxAlive(w.configJson);
+            return {
+              id: w.id,
+              projectId: w.projectId,
+              host: w.host,
+              sessionName: w.sessionName,
+              lastHeartbeat: w.lastHeartbeat,
+              lastClaudeBeat: w.lastClaudeBeat,
+              tmuxAlive,
+              state: deriveWorkhorseState(
+                now,
+                w.lastHeartbeat,
+                w.lastClaudeBeat,
+                tmuxAlive,
+              ),
+            };
+          }),
+        );
+      }
+      case "brain_chat": {
+        const chats = await prisma.brainChat.findMany({
+          where: {
+            ...(summarised === true ? { summaryMd: { not: null } } : {}),
+            ...(summarised === false ? { summaryMd: null } : {}),
+            ...(since ? { createdAt: { gte: since } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          select: {
+            id: true,
+            title: true,
+            createdAt: true,
+            summarizedAt: true,
+            summaryMd: true,
+          },
+        });
+        return jsonResult(chats);
+      }
+      case "job": {
+        const jobs = await prisma.jobRun.findMany({
+          where: {
+            ...(projectId ? { projectId } : {}),
+            ...(subKind ? { kind: subKind as never } : {}),
+            ...(ok !== undefined ? { ok } : {}),
+            ...(since ? { startedAt: { gte: since } } : {}),
+          },
+          orderBy: { startedAt: "desc" },
+          take: limit,
+          select: {
+            id: true,
+            kind: true,
+            title: true,
+            projectId: true,
+            startedAt: true,
+            endedAt: true,
+            ok: true,
+            error: true,
+            costUsd: true,
+            // Skip messagesJson + payloadJson at list time — too noisy.
+            // Use get_entity(kind="job", id) for full detail.
+          },
+        });
+        return jsonResult(jobs);
+      }
+      case "repo_link": {
+        const links = await prisma.repoLink.findMany({
+          where: { ...(projectId ? { projectId } : {}) },
+          orderBy: [{ projectId: "asc" }, { createdAt: "asc" }],
+          take: limit,
+        });
+        return jsonResult(
+          links.map((r) => ({
+            id: r.id,
+            projectId: r.projectId,
+            url: r.url,
+            label: r.label,
+            cachedLastCommitSha: r.cachedLastCommitSha,
+            cachedLastCommitAt: r.cachedLastCommitAt,
+            createdAt: r.createdAt,
+          })),
+        );
+      }
+      case "paper": {
+        const papers = await prisma.paper.findMany({
+          where: {
+            ...(projectId ? { primaryProjectId: projectId } : {}),
+            ...(status ? { status: status as never } : {}),
+            ...(since ? { updatedAt: { gte: since } } : {}),
+          },
+          orderBy: { updatedAt: "desc" },
+          take: limit,
+          include: { _count: { select: { sections: true } } },
+        });
+        return jsonResult(
+          papers.map((p) => ({
+            id: p.id,
+            primaryProjectId: p.primaryProjectId,
+            title: p.title,
+            status: p.status,
+            venue: p.venue,
+            arxivId: p.arxivId,
+            sectionCount: p._count.sections,
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt,
+          })),
+        );
+      }
+      case "tag": {
+        const tags = await prisma.tag.findMany({
+          include: { _count: { select: { projects: true } } },
+        });
+        const sorted = tags
+          .filter((t) => t._count.projects > 0)
+          .sort((a, b) => {
+            if (b._count.projects !== a._count.projects)
+              return b._count.projects - a._count.projects;
+            return a.name.localeCompare(b.name);
+          })
+          .slice(0, limit);
+        return jsonResult(
+          sorted.map((t) => ({
+            id: t.id,
+            name: t.name,
+            projectCount: t._count.projects,
+          })),
+        );
+      }
+      case "metric_definition": {
+        if (!projectId)
+          throw new Error("kind=metric_definition requires projectId");
+        const defs = await prisma.projectMetricDefinition.findMany({
+          where: {
+            projectId,
+            ...(isPrimary !== undefined ? { isPrimary } : {}),
+          },
+          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+          take: limit,
+        });
+        return jsonResult(defs);
+      }
+    }
+    // Unreachable — switch is exhaustive over EntityKind.
+    throw new Error(`unhandled kind: ${kind as string}`);
   },
 };
 
-const listHypotheses: ToolDefinition = {
-  name: "list_hypotheses",
-  description:
-    "List hypotheses for a project. Each has title, statement, status (active/paused/resolved), verdict (pending/supported/refuted/abandoned/spawned_paper), compute budget in GPU-hours, and run count.",
-  inputSchema: {
-    type: "object",
-    properties: { projectId: { type: "string" } },
-    required: ["projectId"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const hyps = await prisma.hypothesis.findMany({
-      where: { projectId },
-      orderBy: { createdAt: "desc" },
-      include: { _count: { select: { runs: true } } },
-    });
-    return jsonResult(
-      hyps.map((h) => ({
-        id: h.id,
-        title: h.title,
-        statement: h.statement,
-        status: h.status,
-        verdict: h.verdict,
-        computeBudgetGpuHours: h.computeBudgetGpuHours,
-        resolvedAt: h.resolvedAt,
-        runCount: h._count.runs,
-        createdAt: h.createdAt,
-      })),
-    );
-  },
-};
+/* ---------------------------- get_entity ---------------------------- */
 
-const getHypothesis: ToolDefinition = {
-  name: "get_hypothesis",
+const getEntity: ToolDefinition = {
+  name: "get_entity",
   description:
-    "Fetch a single hypothesis's full state including its runs (id, name, status, computeGpuHours).",
-  inputSchema: {
-    type: "object",
-    properties: { id: { type: "string" } },
-    required: ["id"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const id = requireString(args, "id");
-    const h = await prisma.hypothesis.findUnique({
-      where: { id },
-      include: { runs: { orderBy: { createdAt: "desc" } } },
-    });
-    if (!h) throw new Error(`hypothesis not found: ${id}`);
-    const usedGpuHours = h.runs.reduce((acc, r) => acc + (r.computeGpuHours ?? 0), 0);
-    return jsonResult({
-      id: h.id,
-      projectId: h.projectId,
-      title: h.title,
-      statement: h.statement,
-      status: h.status,
-      verdict: h.verdict,
-      computeBudgetGpuHours: h.computeBudgetGpuHours,
-      computeUsedGpuHours: usedGpuHours,
-      resolvedAt: h.resolvedAt,
-      runs: h.runs.map((r) => ({
-        id: r.id,
-        name: r.name,
-        status: r.status,
-        wandbRunId: r.wandbRunId,
-        computeGpuHours: r.computeGpuHours,
-        startedAt: r.startedAt,
-        endedAt: r.endedAt,
-      })),
-    });
-  },
-};
-
-const listMessages: ToolDefinition = {
-  name: "list_messages",
-  description:
-    "List AgentMessages for a project (recent feed). Filter by unread (readAt IS NULL), severity, source, or kind. Use this to read what other agents have surfaced before deciding what to do.",
+    "Fetch a single ScienceDash row by id with deep detail. Per-kind notes:\n" +
+    "- project: includes tags, repoLinks, wandbSources, metricDefinitions, primary metric, counts of related rows.\n" +
+    "- programme: includes its project list (id, title, status).\n" +
+    "- run: full state with metric values (name/value/unit/direction/threshold) and hypothesis title — folds in the old summarise_run.\n" +
+    "- hypothesis: full state with all runs.\n" +
+    "- brain_chat: full transcript + summary.\n" +
+    "- paper: includes sections (kind, title, status).\n" +
+    "- job: includes payloadJson + messagesJson (heavy — only fetch when you need the trace).\n" +
+    "- note, decision, check_in, message, workhorse, repo_link, tag, metric_definition: plain row by id.",
   inputSchema: {
     type: "object",
     properties: {
-      projectId: { type: "string" },
-      unreadOnly: { type: "boolean", default: false },
-      severity: { type: "string", description: "info | suggestion | decision | blocker" },
-      source: { type: "string", description: "Filter to a single source (e.g. 'project-brain')." },
-      kind: { type: "string", description: "note | alert | status | digest" },
-      limit: { type: "number", default: 30 },
+      kind: {
+        type: "string",
+        enum: [...ENTITY_KINDS],
+      },
+      id: { type: "string" },
     },
-    required: ["projectId"],
+    required: ["kind", "id"],
     additionalProperties: false,
   },
   async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const unreadOnly = args.unreadOnly === true;
-    const severity = optString(args, "severity");
-    const source = optString(args, "source");
-    const kind = optString(args, "kind");
-    const limit = optInt(args, "limit") ?? 30;
-    const messages = await prisma.agentMessage.findMany({
-      where: {
-        projectId,
-        ...(unreadOnly ? { readAt: null } : {}),
-        ...(severity ? { severity: severity as never } : {}),
-        ...(source ? { source } : {}),
-        ...(kind ? { kind: kind as never } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: limit,
-    });
-    return jsonResult(messages);
+    const kind = requireString(args, "kind") as EntityKind;
+    const id = requireString(args, "id");
+    if (!ENTITY_KINDS.includes(kind)) {
+      throw new Error(
+        `unknown kind: ${kind}; valid: ${ENTITY_KINDS.join(", ")}`,
+      );
+    }
+
+    switch (kind) {
+      case "project": {
+        const p = await prisma.project.findUnique({
+          where: { id },
+          include: {
+            tags: { select: { name: true } },
+            metricDefinitions: true,
+            repoLinks: true,
+            wandbSources: true,
+            programme: { select: { id: true, name: true } },
+            _count: {
+              select: {
+                hypotheses: true,
+                decisions: true,
+                checkIns: true,
+                notes: true,
+                papers: true,
+                workhorses: true,
+                agentMessages: true,
+              },
+            },
+          },
+        });
+        if (!p) throw new Error(`project not found: ${id}`);
+        const primary = p.metricDefinitions.find((m) => m.isPrimary) ?? null;
+        return jsonResult({
+          id: p.id,
+          title: p.title,
+          status: p.status,
+          description: p.description,
+          hypothesis: p.hypothesis,
+          figuresOfMerit: p.figuresOfMerit,
+          timeline: p.timeline,
+          nextSteps: p.nextSteps,
+          narrativeReadiness: p.narrativeReadiness,
+          narrativeReadinessNote: p.narrativeReadinessNote,
+          blockers: p.blockers,
+          tags: p.tags.map((t) => t.name),
+          programme: p.programme,
+          primaryMetric: primary
+            ? {
+                name: primary.name,
+                unit: primary.unit,
+                direction: primary.direction,
+                threshold: primary.threshold,
+              }
+            : null,
+          metricDefinitions: p.metricDefinitions.map((m) => ({
+            id: m.id,
+            name: m.name,
+            unit: m.unit,
+            direction: m.direction,
+            isPrimary: m.isPrimary,
+            threshold: m.threshold,
+          })),
+          repoLinks: p.repoLinks.map((r) => ({
+            id: r.id,
+            url: r.url,
+            label: r.label,
+            cachedLastCommitSha: r.cachedLastCommitSha,
+            cachedLastCommitAt: r.cachedLastCommitAt,
+          })),
+          wandbSources: p.wandbSources.map((w) => ({
+            id: w.id,
+            entity: w.entity,
+            name: w.name,
+          })),
+          counts: p._count,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        });
+      }
+      case "programme": {
+        const pg = await prisma.programme.findUnique({
+          where: { id },
+          include: {
+            projects: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                updatedAt: true,
+                blockers: true,
+              },
+              orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+            },
+          },
+        });
+        if (!pg) throw new Error(`programme not found: ${id}`);
+        return jsonResult(pg);
+      }
+      case "run": {
+        const r = await prisma.run.findUnique({
+          where: { id },
+          include: {
+            hypothesis: {
+              select: { id: true, title: true, projectId: true },
+            },
+            metrics: { include: { definition: true } },
+            wandbSource: true,
+          },
+        });
+        if (!r) throw new Error(`run not found: ${id}`);
+        return jsonResult({
+          id: r.id,
+          name: r.name,
+          status: r.status,
+          wandbRunId: r.wandbRunId,
+          wandbSource: r.wandbSource
+            ? { entity: r.wandbSource.entity, name: r.wandbSource.name }
+            : null,
+          startedAt: r.startedAt,
+          endedAt: r.endedAt,
+          computeGpuHours: r.computeGpuHours,
+          notes: r.notes,
+          hypothesis: r.hypothesis,
+          metrics: r.metrics.map((m) => ({
+            name: m.definition.name,
+            value: m.value,
+            unit: m.definition.unit,
+            direction: m.definition.direction,
+            threshold: m.definition.threshold,
+            isPrimary: m.definition.isPrimary,
+          })),
+        });
+      }
+      case "hypothesis": {
+        const h = await prisma.hypothesis.findUnique({
+          where: { id },
+          include: { runs: { orderBy: { createdAt: "desc" } } },
+        });
+        if (!h) throw new Error(`hypothesis not found: ${id}`);
+        const usedGpuHours = h.runs.reduce(
+          (acc, r) => acc + (r.computeGpuHours ?? 0),
+          0,
+        );
+        return jsonResult({
+          id: h.id,
+          projectId: h.projectId,
+          title: h.title,
+          statement: h.statement,
+          status: h.status,
+          verdict: h.verdict,
+          computeBudgetGpuHours: h.computeBudgetGpuHours,
+          computeUsedGpuHours: usedGpuHours,
+          resolvedAt: h.resolvedAt,
+          createdAt: h.createdAt,
+          runs: h.runs.map((r) => ({
+            id: r.id,
+            name: r.name,
+            status: r.status,
+            wandbRunId: r.wandbRunId,
+            computeGpuHours: r.computeGpuHours,
+            startedAt: r.startedAt,
+            endedAt: r.endedAt,
+          })),
+        });
+      }
+      case "note": {
+        const n = await prisma.note.findUnique({ where: { id } });
+        if (!n) throw new Error(`note not found: ${id}`);
+        return jsonResult(n);
+      }
+      case "decision": {
+        const d = await prisma.decision.findUnique({ where: { id } });
+        if (!d) throw new Error(`decision not found: ${id}`);
+        return jsonResult(d);
+      }
+      case "check_in": {
+        const c = await prisma.checkIn.findUnique({ where: { id } });
+        if (!c) throw new Error(`check_in not found: ${id}`);
+        return jsonResult(c);
+      }
+      case "message": {
+        const m = await prisma.agentMessage.findUnique({
+          where: { id },
+          include: { project: { select: { id: true, title: true } } },
+        });
+        if (!m) throw new Error(`message not found: ${id}`);
+        return jsonResult(m);
+      }
+      case "workhorse": {
+        const w = await prisma.workhorse.findUnique({ where: { id } });
+        if (!w) throw new Error(`workhorse not found: ${id}`);
+        const tmuxAlive = parseTmuxAlive(w.configJson);
+        return jsonResult({
+          ...w,
+          tmuxAlive,
+          state: deriveWorkhorseState(
+            Date.now(),
+            w.lastHeartbeat,
+            w.lastClaudeBeat,
+            tmuxAlive,
+          ),
+        });
+      }
+      case "brain_chat": {
+        const c = await prisma.brainChat.findUnique({ where: { id } });
+        if (!c) throw new Error(`brain_chat not found: ${id}`);
+        return jsonResult(c);
+      }
+      case "job": {
+        const j = await prisma.jobRun.findUnique({ where: { id } });
+        if (!j) throw new Error(`job not found: ${id}`);
+        return jsonResult(j);
+      }
+      case "repo_link": {
+        const r = await prisma.repoLink.findUnique({ where: { id } });
+        if (!r) throw new Error(`repo_link not found: ${id}`);
+        return jsonResult(r);
+      }
+      case "paper": {
+        const p = await prisma.paper.findUnique({
+          where: { id },
+          include: {
+            sections: {
+              orderBy: { order: "asc" },
+              select: {
+                id: true,
+                kind: true,
+                title: true,
+                contentMd: true,
+                order: true,
+              },
+            },
+          },
+        });
+        if (!p) throw new Error(`paper not found: ${id}`);
+        return jsonResult(p);
+      }
+      case "tag": {
+        const t = await prisma.tag.findUnique({
+          where: { id },
+          include: { _count: { select: { projects: true } } },
+        });
+        if (!t) throw new Error(`tag not found: ${id}`);
+        return jsonResult({
+          id: t.id,
+          name: t.name,
+          projectCount: t._count.projects,
+        });
+      }
+      case "metric_definition": {
+        const m = await prisma.projectMetricDefinition.findUnique({
+          where: { id },
+        });
+        if (!m) throw new Error(`metric_definition not found: ${id}`);
+        return jsonResult(m);
+      }
+    }
+    throw new Error(`unhandled kind: ${kind as string}`);
   },
 };
 
-const listWorkhorses: ToolDefinition = {
-  name: "list_workhorses",
-  description:
-    "List registered workhorses for a project, with their host, sessionName, lastHeartbeat (sync), lastClaudeBeat (Claude tool calls), and a derived `state` ∈ alive | idle | dead | unreachable based on staleness thresholds (3 min for unreachable, 10 min for dead, 60 min for idle).",
-  inputSchema: {
-    type: "object",
-    properties: { projectId: { type: "string" } },
-    required: ["projectId"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const workhorses = await prisma.workhorse.findMany({
-      where: { projectId },
-      orderBy: { host: "asc" },
-    });
-    const now = Date.now();
-    return jsonResult(
-      workhorses.map((w) => {
-        const tmuxAlive = parseTmuxAlive(w.configJson);
-        return {
-          id: w.id,
-          host: w.host,
-          sessionName: w.sessionName,
-          lastHeartbeat: w.lastHeartbeat,
-          lastClaudeBeat: w.lastClaudeBeat,
-          tmuxAlive,
-          state: deriveWorkhorseState(now, w.lastHeartbeat, w.lastClaudeBeat, tmuxAlive),
-        };
-      }),
-    );
-  },
-};
+/* ---------------------- workhorse-state helpers --------------------- */
 
 function parseTmuxAlive(configJson: string | null): boolean | null {
   if (!configJson) return null;
   try {
     const parsed = JSON.parse(configJson) as { tmuxAlive?: unknown };
-    return parsed.tmuxAlive === true ? true : parsed.tmuxAlive === false ? false : null;
+    return parsed.tmuxAlive === true
+      ? true
+      : parsed.tmuxAlive === false
+        ? false
+        : null;
   } catch {
     return null;
   }
@@ -490,7 +787,6 @@ function deriveWorkhorseState(
     return "alive";
   }
 
-  // Fallback when tmux signal not yet sent (older sync.py).
   if (!cb) return "dead";
   const claudeAge = now - cb;
   if (claudeAge < 5 * 60_000) return "alive";
@@ -498,74 +794,4 @@ function deriveWorkhorseState(
   return "dead";
 }
 
-const listBrainChats: ToolDefinition = {
-  name: "list_brain_chats",
-  description:
-    "List recent persisted brain-chat sessions (the user's freeform Claude chats with the global brain). Returns id, title, createdAt, summarizedAt, and the bullet summary if the heartbeat has summarised it. Useful for stitching continuity across sessions: in a new chat, call this with limit=3 to see what was discussed lately.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      limit: {
-        type: "number",
-        description: "Max chats to return (default 20).",
-      },
-    },
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const limit = optInt(args, "limit") ?? 20;
-    const chats = await prisma.brainChat.findMany({
-      orderBy: { createdAt: "desc" },
-      take: limit,
-      select: {
-        id: true,
-        title: true,
-        createdAt: true,
-        summarizedAt: true,
-        summaryMd: true,
-      },
-    });
-    return jsonResult(chats);
-  },
-};
-
-const getBrainChat: ToolDefinition = {
-  name: "get_brain_chat",
-  description:
-    "Fetch a single persisted brain-chat session by id, including the full markdown transcript.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      id: { type: "string", description: "BrainChat id." },
-    },
-    required: ["id"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const id = requireString(args, "id");
-    const chat = await prisma.brainChat.findUnique({ where: { id } });
-    if (!chat) {
-      return {
-        content: [{ type: "text", text: `no brain chat with id: ${id}` }],
-        isError: true,
-      };
-    }
-    return jsonResult(chat);
-  },
-};
-
-export const readTools: ToolDefinition[] = [
-  listProjects,
-  getProject,
-  listRuns,
-  summariseRun,
-  listNotes,
-  listDecisions,
-  listCheckIns,
-  listHypotheses,
-  getHypothesis,
-  listMessages,
-  listWorkhorses,
-  listBrainChats,
-  getBrainChat,
-];
+export const readTools: ToolDefinition[] = [queryEntity, getEntity];
