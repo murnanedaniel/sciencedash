@@ -1,21 +1,23 @@
-import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { CopyButton } from "@/components/CopyButton";
 import { daysAgoLabel, formatUtc } from "@/lib/format";
-import { buildBrainChatContext } from "@/lib/brain/chat-context";
+import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Brain chat page — renders a copy-pasteable shell heredoc that bootstraps
- * a local Claude REPL with the ScienceDash MCP loaded and a CHAT_CONTEXT
- * primer covering current programmes, projects, blockers, recent agent
- * messages, and prior chat summaries. Below the bootstrap, lists recent
- * persisted BrainChat sessions with their summaries.
+ * Brain chat page — the daily one-liner pulls a self-contained bash
+ * launcher from /api/brain-chat/launch and pipes it into bash. The
+ * launcher writes ~/.sciencedash/brain-chat/{.mcp.json, CHAT_CONTEXT.md}
+ * with a fresh context snapshot and drops the user into a tmux + claude
+ * session. Token is mirrored from the curl Authorization header into
+ * the .mcp.json so the chat Claude can talk to /api/mcp.
+ *
+ * Below the bootstrap, recent persisted BrainChat sessions are listed
+ * with collapsible transcripts.
  */
 export default async function BrainChatPage() {
-  const [primer, recent, dashboardOrigin, token] = await Promise.all([
-    buildBrainChatContext(),
+  const [recent, dashboardOrigin, token] = await Promise.all([
     prisma.brainChat.findMany({
       orderBy: { createdAt: "desc" },
       take: 20,
@@ -25,9 +27,10 @@ export default async function BrainChatPage() {
   ]);
 
   const tokenPresent = token.length > 0;
-  const bootstrap = tokenPresent
-    ? buildBootstrapCommand({ dashboardOrigin, token, primer })
-    : "";
+  const launchUrl = `${dashboardOrigin}/api/brain-chat/launch`;
+  const oneLiner = `curl -fsSL -H "Authorization: Bearer ${token}" ${launchUrl} | bash`;
+  const aliasLine = `alias brain='curl -fsSL -H "Authorization: Bearer ${token}" ${launchUrl} | bash'`;
+  const attachLine = "tmux attach -t sd-brain";
 
   return (
     <div className="container">
@@ -35,59 +38,60 @@ export default async function BrainChatPage() {
         <div>
           <h1 className="pageTitle">Brain chat</h1>
           <p className="pageSub">
-            Shoot the shit with the global brain. The chat loads with your
-            current programmes / projects / blockers / recent agent traffic
-            already in context.
+            Shoot the shit with the global brain. The launcher pulls fresh
+            context (programmes, projects, blockers, recent agent traffic,
+            prior chat summaries) every time you start a session.
           </p>
         </div>
       </header>
 
       <div className="stack">
         <div className="card">
-          <h2 className="sectionTitle">Start (or resume) a chat</h2>
-          {tokenPresent ? (
+          <h2 className="sectionTitle">Start a chat</h2>
+          {!tokenPresent ? (
+            <p className="muted">
+              <code>SCIENCEDASH_AUTH_TOKEN</code> is not set in the
+              dashboard&apos;s environment. Set it in <code>.env</code> and
+              restart the server to enable the bootstrap.
+            </p>
+          ) : (
             <>
-              <p className="muted small" style={{ marginBottom: 8 }}>
-                Paste this into a terminal on whatever machine you want to chat
-                from. Writes <code>~/.sciencedash/brain-chat/.mcp.json</code> +{" "}
-                <code>CHAT_CONTEXT.md</code>, then drops you into a tmux session
-                running <code>claude</code> with the ScienceDash MCP loaded.
-                Subsequent runs resume the same session via{" "}
-                <code>claude --continue</code>.
+              <p className="muted small" style={{ marginBottom: 6 }}>
+                Daily one-liner — pipes a self-contained bash launcher
+                into your shell. Drops you into a tmux session running{" "}
+                <code>claude</code> with the ScienceDash MCP and a
+                current-state primer loaded.
               </p>
-              <pre
-                style={{
-                  background: "var(--card-muted, #f6f6f6)",
-                  padding: 10,
-                  borderRadius: 4,
-                  overflow: "auto",
-                  fontSize: 12,
-                  margin: 0,
-                  whiteSpace: "pre",
-                }}
+              <Snippet value={oneLiner} />
+
+              <p
+                className="muted small"
+                style={{ marginTop: 14, marginBottom: 6 }}
               >
-                {bootstrap}
-              </pre>
-              <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                <CopyButton value={bootstrap} label="Copy command" variant="primary" />
-                <CopyButton
-                  value="tmux attach -t sd-brain"
-                  label="Copy attach"
-                  title="Re-attach to an already-running brain-chat session"
-                />
-              </div>
-              <p className="muted small" style={{ marginTop: 10, marginBottom: 0 }}>
-                When you&apos;re done, tell the chat &ldquo;we&apos;re done&rdquo; — it&apos;ll
-                call <code>submit_brain_chat</code> to persist the session here. The
-                next global brain heartbeat will summarise it if you didn&apos;t.
+                One-time setup — append this to your <code>~/.bashrc</code>{" "}
+                (or zshrc) to launch with just <code>brain</code>:
+              </p>
+              <Snippet value={aliasLine} />
+
+              <p
+                className="muted small"
+                style={{ marginTop: 14, marginBottom: 6 }}
+              >
+                Re-attach to an already-running session (e.g. another
+                terminal closed):
+              </p>
+              <Snippet value={attachLine} />
+
+              <p
+                className="muted small"
+                style={{ marginTop: 14, marginBottom: 0 }}
+              >
+                When you&apos;re done, tell the chat &ldquo;we&apos;re
+                done&rdquo; — it persists the session here via{" "}
+                <code>submit_brain_chat</code>. The next global brain
+                heartbeat fills in the bullet summary if you didn&apos;t.
               </p>
             </>
-          ) : (
-            <p className="muted">
-              <code>SCIENCEDASH_AUTH_TOKEN</code> is not set in the dashboard&apos;s
-              environment. Set it in <code>.env</code> and restart the server to
-              enable the bootstrap.
-            </p>
           )}
         </div>
 
@@ -113,7 +117,8 @@ export default async function BrainChatPage() {
                       <strong>{c.title}</strong>
                       <span className="muted small">
                         {" · "}
-                        {formatUtc(c.createdAt)} UTC · {daysAgoLabel(c.createdAt)}
+                        {formatUtc(c.createdAt)} UTC ·{" "}
+                        {daysAgoLabel(c.createdAt)}
                         {" · "}
                         {c.summaryMd ? "summarised" : "summary pending"}
                       </span>
@@ -132,12 +137,15 @@ export default async function BrainChatPage() {
                     </pre>
                   ) : (
                     <p className="muted small" style={{ marginTop: 8 }}>
-                      Summary pending — the next global brain heartbeat will fill
-                      this in.
+                      Summary pending — the next global brain heartbeat
+                      will fill this in.
                     </p>
                   )}
                   <details style={{ marginTop: 10 }}>
-                    <summary className="muted small" style={{ cursor: "pointer" }}>
+                    <summary
+                      className="muted small"
+                      style={{ cursor: "pointer" }}
+                    >
                       transcript
                     </summary>
                     <pre
@@ -163,56 +171,27 @@ export default async function BrainChatPage() {
   );
 }
 
-/**
- * Resolve the public origin (scheme + host) the local Claude REPL should
- * call to reach this dashboard. Prefers SCIENCEDASH_BASE_URL when set
- * (canonical for the homebox), falls back to X-Forwarded-{Host,Proto}
- * (set by the proxy in front of dev / local), then to the Host header.
- */
-async function resolveDashboardOrigin(): Promise<string> {
-  const env = process.env.SCIENCEDASH_BASE_URL?.trim();
-  if (env) return env.replace(/\/$/, "");
-  const h = await headers();
-  const host =
-    h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  const proto = h.get("x-forwarded-proto") ?? "http";
-  return `${proto}://${host}`;
-}
-
-function buildBootstrapCommand(args: {
-  dashboardOrigin: string;
-  token: string;
-  primer: string;
-}): string {
-  const mcpConfig = JSON.stringify(
-    {
-      mcpServers: {
-        sciencedash: {
-          type: "http",
-          url: `${args.dashboardOrigin}/api/mcp`,
-          headers: {
-            Authorization: `Bearer ${args.token}`,
-          },
-        },
-      },
-    },
-    null,
-    2,
+function Snippet({ value }: { value: string }) {
+  return (
+    <div
+      className="row"
+      style={{ gap: 8, alignItems: "stretch", flexWrap: "nowrap" }}
+    >
+      <pre
+        style={{
+          flex: 1,
+          background: "var(--card-muted, #f6f6f6)",
+          padding: 8,
+          borderRadius: 4,
+          overflow: "auto",
+          fontSize: 12,
+          margin: 0,
+          whiteSpace: "pre",
+        }}
+      >
+        {value}
+      </pre>
+      <CopyButton value={value} label="Copy" />
+    </div>
   );
-
-  // Single-quoted heredoc terminators ('SDMCP_EOF', 'SDCTX_EOF') prevent
-  // shell expansion inside the file bodies — token characters, $, and
-  // backticks are all safe.
-  return [
-    "mkdir -p ~/.sciencedash/brain-chat",
-    "cat > ~/.sciencedash/brain-chat/.mcp.json <<'SDMCP_EOF'",
-    mcpConfig,
-    "SDMCP_EOF",
-    "cat > ~/.sciencedash/brain-chat/CHAT_CONTEXT.md <<'SDCTX_EOF'",
-    args.primer,
-    "SDCTX_EOF",
-    "chmod 600 ~/.sciencedash/brain-chat/.mcp.json",
-    "cd ~/.sciencedash/brain-chat",
-    "tmux new -As sd-brain 'claude --continue --mcp-config .mcp.json --append-system-prompt \"$(cat CHAT_CONTEXT.md)\" 2>/dev/null || claude --mcp-config .mcp.json --append-system-prompt \"$(cat CHAT_CONTEXT.md)\"'",
-  ].join("\n");
 }

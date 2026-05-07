@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { prisma } from "@/lib/prisma";
+import { buildMcpServerConfig } from "@/lib/brain/mcp-client";
 
 const ROOTS_TO_SCAN = ["Research", "code", "src", "Projects", "projects"];
 
@@ -74,11 +75,21 @@ export async function persistMcpConfigAction(formData: FormData): Promise<{ ok: 
   });
   if (!project?.localPath) return;
 
+  const token = process.env.SCIENCEDASH_AUTH_TOKEN;
+  if (!token) {
+    // Without the token the spawned Claude would 401 against the proxy
+    // every MCP call. Surface the misconfig instead of writing a broken
+    // .mcp.json that fails opaquely later.
+    return {
+      ok: false,
+      error:
+        "SCIENCEDASH_AUTH_TOKEN missing from server env — can't write a working .mcp.json",
+    };
+  }
   const mcpConfig = {
     mcpServers: {
       sciencedash: {
-        type: "http",
-        url: `${dashboardUrl.replace(/\/$/, "")}/api/mcp`,
+        ...buildMcpServerConfig({ dashboardUrl, token }),
         // jsonargparse-friendly defaults: pass projectId via env so MCP tool
         // calls can default the projectId argument.
         env: { SCIENCEDASH_PROJECT_ID: projectId },
