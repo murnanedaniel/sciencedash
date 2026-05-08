@@ -73,10 +73,6 @@ type SyncRequest = {
   lastDirectiveId?: string;
 };
 
-function directiveSource(host: string, sessionName: string): string {
-  return `dashboard@${host}:${sessionName}`;
-}
-
 export async function POST(req: NextRequest) {
   let body: SyncRequest;
   try {
@@ -104,6 +100,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `project not found: ${projectId}` }, { status: 404 });
   }
 
+  // Flap-prevention: if a stop_session directive is pending for this
+  // (host, sessionName), refuse to re-upsert / re-update the Workhorse
+  // row. Without this guard, removeWorkhorseAction's optimistic delete
+  // gets undone by the upsert below — the directive then runs and
+  // sync.py stops beating, but the row that just flapped back stays
+  // visible until the next manual cleanup.
+  //
+  // We match by `endsWith: @host:session` so directives queued by
+  // either the dashboard ("dashboard@host:session") or the brain via
+  // MCP ("mcp@host:session") both register here.
+  const pendingStopSession = await prisma.agentMessage.findFirst({
+    where: {
+      projectId,
+      kind: "directive",
+      body: "stop_session",
+      source: { endsWith: `@${host}:${sessionName}` },
+      readAt: null,
+    },
+    select: { id: true },
+  });
+
   // Upsert workhorse row (auto-register on first sync). Capture the
   // workhorse-side repo path AND the tmux session liveness so the
   // dashboard can render copy-paste tmux commands and derive accurate
@@ -126,17 +143,19 @@ export async function POST(req: NextRequest) {
   if (claudeBusy !== undefined) configFields.claudeBusy = claudeBusy;
   if (activeHost) configFields.activeHost = activeHost;
   const configJson = Object.keys(configFields).length > 0 ? JSON.stringify(configFields) : undefined;
-  await prisma.workhorse.upsert({
-    where: { host_sessionName: { host, sessionName } },
-    create: { host, projectId, sessionName, configJson: configJson ?? null },
-    update: {
-      // projectId is part of identity for create-only; on updates we
-      // could in principle re-link if the user moved the session to
-      // another project, but in practice (host, sessionName) → project
-      // is stable, so just refresh the live fields.
-      ...(configJson ? { configJson } : {}),
-    },
-  });
+  if (!pendingStopSession) {
+    await prisma.workhorse.upsert({
+      where: { host_sessionName: { host, sessionName } },
+      create: { host, projectId, sessionName, configJson: configJson ?? null },
+      update: {
+        // projectId is part of identity for create-only; on updates we
+        // could in principle re-link if the user moved the session to
+        // another project, but in practice (host, sessionName) → project
+        // is stable, so just refresh the live fields.
+        ...(configJson ? { configJson } : {}),
+      },
+    });
+  }
 
   const outbox = Array.isArray(body.outbox) ? body.outbox : [];
   let lastSyncBeat: Date | null = null;
@@ -174,21 +193,24 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   if (!lastSyncBeat || now > lastSyncBeat) lastSyncBeat = now;
 
-  await prisma.workhorse.update({
-    where: { host_sessionName: { host, sessionName } },
-    data: {
-      lastHeartbeat: lastSyncBeat,
-      ...(lastClaudeBeat ? { lastClaudeBeat } : {}),
-    },
-  });
+  if (!pendingStopSession) {
+    await prisma.workhorse.update({
+      where: { host_sessionName: { host, sessionName } },
+      data: {
+        lastHeartbeat: lastSyncBeat,
+        ...(lastClaudeBeat ? { lastClaudeBeat } : {}),
+      },
+    });
+  }
 
-  // Pull any unread directives addressed to this workhorse.
-  const directiveSrc = directiveSource(host, sessionName);
+  // Pull any unread directives addressed to this workhorse. Match by
+  // suffix so dashboard-queued (`dashboard@…`) and MCP-queued (`mcp@…`)
+  // directives are both delivered.
   const directives = await prisma.agentMessage.findMany({
     where: {
       projectId,
       kind: "directive",
-      source: directiveSrc,
+      source: { endsWith: `@${host}:${sessionName}` },
       readAt: null,
       ...(body.lastDirectiveId
         ? { id: { not: body.lastDirectiveId } }
