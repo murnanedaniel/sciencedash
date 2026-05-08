@@ -440,7 +440,7 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
               </form>
             </div>
 
-            <WorkhorsesPanel projectId={project.id} />
+            <WorkhorsesPanel projectId={project.id} projectTitle={project.title} />
 
             <div className="card">
               <h2 className="sectionTitle">W&amp;B projects</h2>

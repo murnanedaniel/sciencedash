@@ -13,6 +13,8 @@ import {
   tickWorkhorseAction,
 } from "@/lib/server/agentMessageActions";
 import { CopyButton } from "@/components/CopyButton";
+import { AddWorkhorseForm } from "@/components/AddWorkhorseForm";
+import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
 
 const HOST_STALE_MS = 3 * 60_000;
 const CLAUDE_IDLE_MS = 30 * 60_000;
@@ -81,12 +83,21 @@ function relTime(d: Date | null): string {
   return `${Math.floor(sec / 86400)}d ago`;
 }
 
-export async function WorkhorsesPanel({ projectId }: { projectId: string }) {
-  const workhorses = await prisma.workhorse.findMany({
-    where: { projectId },
-    orderBy: { host: "asc" },
-  });
-  if (workhorses.length === 0) return null; // nothing to show; project page stays clean
+export async function WorkhorsesPanel({
+  projectId,
+  projectTitle,
+}: {
+  projectId: string;
+  projectTitle: string;
+}) {
+  const [workhorses, dashboardOrigin] = await Promise.all([
+    prisma.workhorse.findMany({
+      where: { projectId },
+      orderBy: { host: "asc" },
+    }),
+    resolveDashboardOrigin(),
+  ]);
+  const token = process.env.SCIENCEDASH_AUTH_TOKEN ?? "";
 
   const now = Date.now();
   return (
@@ -95,8 +106,20 @@ export async function WorkhorsesPanel({ projectId }: { projectId: string }) {
         <h2 className="sectionTitle" style={{ margin: 0 }}>
           Workhorses
         </h2>
-        <span className="muted small">{workhorses.length} registered</span>
+        <span className="muted small">
+          {workhorses.length === 0
+            ? "no workhorses yet"
+            : `${workhorses.length} registered`}
+        </span>
       </div>
+      {workhorses.length === 0 ? (
+        <p className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
+          A workhorse is a Claude REPL running in a tmux session on a compute
+          host (Perlmutter login, Vast box, etc.) that ScienceDash can talk to
+          via MCP. Once one is registered, you can Restart and Tick it from
+          here. Use the form below to spin one up.
+        </p>
+      ) : null}
       <div className="stack" style={{ marginTop: 10, gap: 8 }}>
         {workhorses.map((w) => {
           const config = parseConfigJson(w.configJson);
@@ -224,6 +247,12 @@ export async function WorkhorsesPanel({ projectId }: { projectId: string }) {
           );
         })}
       </div>
+      <AddWorkhorseForm
+        projectId={projectId}
+        projectTitle={projectTitle}
+        dashboardOrigin={dashboardOrigin}
+        token={token}
+      />
     </div>
   );
 }
