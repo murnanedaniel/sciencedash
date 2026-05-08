@@ -1195,6 +1195,45 @@ const createMetricDefinition: ToolDefinition = {
   },
 };
 
+const removeWorkhorse: ToolDefinition = {
+  name: "remove_workhorse",
+  description:
+    "Stop and unregister a workhorse. Queues a `stop_session` directive (sync.py kills the tmux session + removes the project from the host's local ~/.sciencedash/config.json) and deletes the Workhorse row from the dashboard. Same mechanism as the dashboard's Remove button. Other workhorses on the same host (for other projects) are unaffected.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Workhorse id." },
+    },
+    required: ["id"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const id = requireString(args, "id");
+    const w = await prisma.workhorse.findUnique({
+      where: { id },
+      select: { id: true, host: true, projectId: true, sessionName: true },
+    });
+    if (!w) throw new Error(`workhorse not found: ${id}`);
+    await prisma.agentMessage.create({
+      data: {
+        projectId: w.projectId,
+        kind: "directive",
+        severity: "info",
+        source: `mcp@${w.host}:${w.sessionName}`,
+        body: "stop_session",
+        payloadJson: null,
+      },
+    });
+    await prisma.workhorse.delete({ where: { id } });
+    return jsonResult({
+      id: w.id,
+      host: w.host,
+      sessionName: w.sessionName,
+      removed: true,
+    });
+  },
+};
+
 const refreshRepo: ToolDefinition = {
   name: "refresh_repo",
   description:
@@ -1259,4 +1298,5 @@ export const writeTools: ToolDefinition[] = [
   createPaper,
   createMetricDefinition,
   refreshRepo,
+  removeWorkhorse,
 ];

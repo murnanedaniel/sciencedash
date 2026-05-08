@@ -14,6 +14,7 @@ import {
 } from "@/lib/server/agentMessageActions";
 import { CopyButton } from "@/components/CopyButton";
 import { AddWorkhorseForm } from "@/components/AddWorkhorseForm";
+import { RemoveWorkhorseButton } from "@/components/RemoveWorkhorseButton";
 import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
 
 const HOST_STALE_MS = 3 * 60_000;
@@ -242,6 +243,15 @@ export async function WorkhorsesPanel({
                     Tick
                   </button>
                 </form>
+                {/* Remove: queue stop_session directive (kills tmux +
+                    drops project from local config.json) and unregister
+                    the row. Always available — graceful for live
+                    workhorses, cleanup for unreachable ones. */}
+                <RemoveWorkhorseButton
+                  workhorseId={w.id}
+                  host={w.host}
+                  sessionName={w.sessionName}
+                />
               </div>
             </div>
           );

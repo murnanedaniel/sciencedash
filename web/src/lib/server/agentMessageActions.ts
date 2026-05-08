@@ -70,6 +70,41 @@ export async function tickWorkhorseAction(formData: FormData): Promise<void> {
   revalidatePath(`/projects/${w.projectId}`);
 }
 
+/**
+ * Stop and unregister a workhorse:
+ *   1. Queue a `stop_session` directive — sync.py on the host kills the
+ *      tmux session and removes the project entry from its local
+ *      ~/.sciencedash/config.json so future sync ticks don't beat for it.
+ *   2. Optimistically delete the Workhorse row. There's a tiny window
+ *      where sync.py might beat between (1) and (2) and re-upsert the
+ *      row, but the directive in the same response immediately stops
+ *      it — net result: the row stays gone.
+ *
+ * If the host is offline, the directive sits unread until the host
+ * comes back; on the first beat it executes before any visible flap.
+ */
+export async function removeWorkhorseAction(formData: FormData): Promise<void> {
+  const workhorseId = String(formData.get("workhorseId") ?? "");
+  if (!workhorseId) return;
+  const w = await prisma.workhorse.findUnique({
+    where: { id: workhorseId },
+    select: { host: true, projectId: true, sessionName: true },
+  });
+  if (!w) return;
+  await prisma.agentMessage.create({
+    data: {
+      projectId: w.projectId,
+      kind: "directive",
+      severity: "info",
+      source: `dashboard@${w.host}:${w.sessionName}`,
+      body: "stop_session",
+      payloadJson: null,
+    },
+  });
+  await prisma.workhorse.delete({ where: { id: workhorseId } });
+  revalidatePath(`/projects/${w.projectId}`);
+}
+
 export async function markMessageReadAction(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;

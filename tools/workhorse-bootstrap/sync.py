@@ -257,6 +257,12 @@ def execute_directive(
             session_name=session_name,
             payload=payload,
         )
+    if name == "stop_session":
+        return _stop_session(
+            session_name=session_name,
+            project_id=project_id,
+            root=root,
+        )
     if name == "ping":
         return {"ok": True, "noted": "pong"}
     return {"ok": False, "error": f"unknown directive: {name!r}"}
@@ -385,6 +391,68 @@ def _revive_session(
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "tmux start timed out"}
     return {"ok": True, "session": session_name}
+
+
+def _stop_session(
+    session_name: str,
+    project_id: str,
+    root: Path,
+) -> dict[str, Any]:
+    """Honor a `stop_session` directive from the dashboard.
+
+    Two responsibilities:
+      1. Kill the project's Claude tmux session if alive (idempotent —
+         "session not found" is treated as already-stopped).
+      2. Remove the project's entry from local config.json so future
+         sync ticks don't beat for it. Other projects on this host
+         (different projectIds) stay in projects[].
+
+    Returns a result dict for the directive's outbox-acked status line.
+    """
+    result: dict[str, Any] = {"session": session_name, "projectId": project_id}
+
+    if shutil.which("tmux") is None:
+        result["tmuxKilled"] = "tmux-not-installed"
+    elif _tmux_has_session(session_name) is True:
+        try:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", session_name],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+            result["tmuxKilled"] = True
+        except subprocess.CalledProcessError as e:
+            result["tmuxKilled"] = False
+            result["tmuxError"] = (
+                e.stderr.decode("utf-8", "replace")[:200] if e.stderr else str(e)[:200]
+            )
+        except subprocess.TimeoutExpired:
+            result["tmuxKilled"] = False
+            result["tmuxError"] = "kill-session timed out"
+    else:
+        result["tmuxKilled"] = "not-alive"
+
+    cfg_path = root / "config.json"
+    try:
+        with open(cfg_path) as f:
+            on_disk = json.load(f)
+        before = len(on_disk.get("projects", []))
+        on_disk["projects"] = [
+            p for p in on_disk.get("projects", [])
+            if p.get("projectId") != project_id
+        ]
+        after = len(on_disk["projects"])
+        with open(cfg_path, "w") as f:
+            json.dump(on_disk, f, indent=2)
+            f.write("\n")
+        result["configEntriesRemoved"] = before - after
+        result["projectsRemaining"] = after
+    except (OSError, json.JSONDecodeError) as e:
+        result["configError"] = str(e)[:200]
+
+    result["ok"] = True
+    return result
 
 
 # ----------------------------- main loop --------------------------------- #
