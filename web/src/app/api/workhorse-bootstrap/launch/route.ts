@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,33 @@ export async function GET(req: NextRequest) {
   // sessionName convention: sd-<first-10-chars-of-projectId>. Stable per
   // (host, project) so re-running the bootstrap is idempotent.
   const sessionName = `sd-${projectId.slice(0, 10)}`;
+
+  // Cancel any pending unread `stop_session` directives for this
+  // session. Without this, a directive queued from a previous Remove
+  // click sits in the DB; the moment the freshly-bootstrapped sync.py
+  // fetches directives, it executes the stale stop_session — which
+  // wipes the project entry from local config.json that the bootstrap
+  // *just* added. Net effect: bootstrap looks like it worked, but the
+  // workhorse never beats.
+  //
+  // Re-running the bootstrap is the user's signal "I want this active";
+  // any prior stop intents are stale. Match by sessionName so directives
+  // for any host (dashboard@host:session, mcp@host:session) are caught.
+  const cancelled = await prisma.agentMessage.updateMany({
+    where: {
+      projectId,
+      kind: "directive",
+      body: "stop_session",
+      source: { endsWith: `:${sessionName}` },
+      readAt: null,
+    },
+    data: { readAt: new Date() },
+  });
+  if (cancelled.count > 0) {
+    console.log(
+      `[workhorse-bootstrap] cancelled ${cancelled.count} stale stop_session directive(s) for ${sessionName}`,
+    );
+  }
 
   // Read the three bootstrap files from the repo's tools dir at request
   // time. Same pattern as /docs (web/src/app/(dash)/docs/page.tsx) and
