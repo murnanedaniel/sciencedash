@@ -71,30 +71,28 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
   // clause. `colliderml` + `exploit` → projects with BOTH.
   const tagAnd = tags.map((name) => ({ tags: { some: { name } } }));
 
+  // SQLite's Prisma connector doesn't support `mode: "insensitive"` (that's
+  // a Postgres-only feature). `contains` on SQLite uses LIKE which is
+  // ASCII-case-insensitive by default, so plain `contains` covers the
+  // common case without the `mode` field.
   const andClauses: object[] = [
     ...tagAnd,
     ...(q
       ? [
           {
             OR: [
-              { title: { contains: q, mode: "insensitive" as const } },
-              { hypothesis: { contains: q, mode: "insensitive" as const } },
-              { nextSteps: { contains: q, mode: "insensitive" as const } },
-              { figuresOfMerit: { contains: q, mode: "insensitive" as const } },
-              { timeline: { contains: q, mode: "insensitive" as const } },
+              { title: { contains: q } },
+              { hypothesis: { contains: q } },
+              { nextSteps: { contains: q } },
+              { figuresOfMerit: { contains: q } },
+              { timeline: { contains: q } },
             ],
           },
         ]
       : []),
-    ...(fom
-      ? [{ figuresOfMerit: { contains: fom, mode: "insensitive" as const } }]
-      : []),
-    ...(timeline
-      ? [{ timeline: { contains: timeline, mode: "insensitive" as const } }]
-      : []),
-    ...(next
-      ? [{ nextSteps: { contains: next, mode: "insensitive" as const } }]
-      : []),
+    ...(fom ? [{ figuresOfMerit: { contains: fom } }] : []),
+    ...(timeline ? [{ timeline: { contains: timeline } }] : []),
+    ...(next ? [{ nextSteps: { contains: next } }] : []),
   ];
 
   const where = {
