@@ -52,7 +52,7 @@ type CallAgentOptions = {
 /* ----------------------- claude path resolver ----------------------- */
 
 let cachedClaudePath: string | null | undefined;
-async function resolveClaudePath(): Promise<string | null> {
+export async function resolveClaudePath(): Promise<string | null> {
   if (cachedClaudePath !== undefined) return cachedClaudePath;
 
   // First: `which claude` — honours whatever PATH the process has.

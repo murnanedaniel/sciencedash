@@ -36,6 +36,7 @@ export default async function DashLayout({
       <aside className="sidebar">
         <nav className="navStack">
           <SidebarLink href="/" label="Today" hotkey="g T" />
+          <SidebarLink href="/chat" label="Chat" hotkey="g C" />
           <SidebarLink href="/programmes" label="Programmes" hotkey="g M" />
           <SidebarLink href="/projects" label="Projects" hotkey="g P" />
           <SidebarLink href="/papers" label="Papers" hotkey="g A" />
