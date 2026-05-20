@@ -4,6 +4,7 @@ import { formatUtc, daysAgoLabel } from "@/lib/format";
 import { RunJobButton } from "@/components/RunJobButton";
 import { CopyButton } from "@/components/CopyButton";
 import { DeployStatusWidget } from "@/components/DeployStatusWidget";
+import { StopAllWorkhorsesButton } from "@/components/StopAllWorkhorsesButton";
 import {
   upsertPromptTemplate,
   resetPromptTemplate,
@@ -64,6 +65,18 @@ export default async function SettingsPage() {
       brainIntervalSec: true,
       workhorseIntervalSec: true,
       brainLastHeartbeatAt: true,
+    },
+  });
+
+  // For the "Stop all workhorses" kill switch in the fleet panel.
+  const workhorseFleet = await prisma.workhorse.findMany({
+    orderBy: [{ host: "asc" }, { sessionName: "asc" }],
+    select: {
+      id: true,
+      host: true,
+      sessionName: true,
+      lastHeartbeat: true,
+      projectId: true,
     },
   });
 
@@ -249,6 +262,52 @@ export default async function SettingsPage() {
             (cloudflared + SSH-tunnel alternative). Wire protocol:{" "}
             <code>docs/workhorse-protocol.md</code>.
           </p>
+        </div>
+
+        {/* Workhorse fleet — currently registered + kill switch. */}
+        <div className="card">
+          <h2 className="sectionTitle">Workhorse fleet</h2>
+          <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
+            Live workhorses across every registered host. The chat surface
+            auto-fires <code>dispatch_workhorse_session</code> — this is the
+            kill switch that takes everything back in one click.
+          </p>
+          {workhorseFleet.length === 0 ? (
+            <p className="muted small" style={{ marginTop: 0 }}>
+              No registered workhorses.
+            </p>
+          ) : (
+            <ul
+              className="stack small"
+              style={{ listStyle: "none", marginBottom: 10 }}
+            >
+              {workhorseFleet.map((w) => (
+                <li
+                  key={w.id}
+                  className="row"
+                  style={{ justifyContent: "space-between", padding: "4px 0" }}
+                >
+                  <span>
+                    <code style={{ fontSize: 12 }}>
+                      {w.host}:{w.sessionName}
+                    </code>{" "}
+                    <Link
+                      className="link small muted"
+                      href={`/projects/${w.projectId}`}
+                    >
+                      project →
+                    </Link>
+                  </span>
+                  <span className="muted small">
+                    {w.lastHeartbeat
+                      ? daysAgoLabel(w.lastHeartbeat)
+                      : "no beats yet"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <StopAllWorkhorsesButton count={workhorseFleet.length} />
         </div>
 
         {/* Worker */}

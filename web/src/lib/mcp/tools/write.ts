@@ -1195,6 +1195,129 @@ const createMetricDefinition: ToolDefinition = {
   },
 };
 
+const dispatchWorkhorseSession: ToolDefinition = {
+  name: "dispatch_workhorse_session",
+  description:
+    "Spin up a brand-new workhorse on `host` for `projectId` against `repo` (absolute path on that host). On the next sync tick (≤60s) the host's sync.py picks up a `start_session` directive, registers the project locally, and launches `claude --mcp-config ... --append-system-prompt ...` in a fresh tmux session. If `initialPrompt` is provided it's tmux-send-keys'd into the REPL once it's up. Idempotent: re-dispatching kills any existing session with the same name. The host MUST already have sync.py running (one-time bootstrap via the workhorse-bootstrap launch endpoint). Returns the queued directive id. Conventionally this is auto-fired with no permission gate — counterpart is `stop_all_workhorses` for the kill switch.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string" },
+      host: {
+        type: "string",
+        description:
+          "Logical host name as it appears in `~/.sciencedash/config.json` on the target machine (e.g. 'perlmutter').",
+      },
+      repo: {
+        type: "string",
+        description:
+          "Absolute path to the repo on the target host (e.g. '/global/u1/m/me/research/dipole-pulse'). Tilde expansion happens on the workhorse side.",
+      },
+      initialPrompt: {
+        type: "string",
+        description:
+          "Optional first user message to send into the Claude REPL once it's up. Skip if you want the user to drive interactively.",
+      },
+    },
+    required: ["projectId", "host", "repo"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = requireString(args, "projectId");
+    const host = requireString(args, "host");
+    const repo = requireString(args, "repo");
+    const initialPrompt = optString(args, "initialPrompt");
+
+    // Project must exist (FK enforcement + clearer error).
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!project) throw new Error(`project not found: ${projectId}`);
+
+    const sessionName = `sd-${projectId.slice(0, 10)}`;
+
+    // Cancel any pending unread `stop_session` directives for this
+    // (host, session). Same race fix as the workhorse-bootstrap launch
+    // endpoint: a stale stop intent could otherwise immediately undo
+    // the registration we're about to queue.
+    await prisma.agentMessage.updateMany({
+      where: {
+        projectId,
+        kind: "directive",
+        body: "stop_session",
+        source: { endsWith: `:${sessionName}` },
+        readAt: null,
+      },
+      data: { readAt: new Date() },
+    });
+
+    const payload: Record<string, unknown> = { repo };
+    if (initialPrompt && initialPrompt.trim()) {
+      payload.initialPrompt = initialPrompt.trim();
+    }
+
+    const directive = await prisma.agentMessage.create({
+      data: {
+        projectId,
+        kind: "directive",
+        severity: "info",
+        source: `mcp@${host}:${sessionName}`,
+        body: "start_session",
+        payloadJson: JSON.stringify(payload),
+      },
+    });
+
+    return jsonResult({
+      directiveId: directive.id,
+      projectId,
+      host,
+      sessionName,
+      repo,
+      note: "Queued. Workhorse should appear on the project page within ~60s once sync.py picks up the directive.",
+    });
+  },
+};
+
+const stopAllWorkhorses: ToolDefinition = {
+  name: "stop_all_workhorses",
+  description:
+    "Kill switch — queue `stop_session` directives for every registered Workhorse and delete the rows from the dashboard. Use when the user signals 'stop everything' or 'shut down all workhorses'. Returns the count stopped. Safe to call when nothing is running (returns 0).",
+  inputSchema: {
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  },
+  async handler() {
+    const workhorses = await prisma.workhorse.findMany({
+      select: { id: true, host: true, projectId: true, sessionName: true },
+    });
+    if (workhorses.length === 0) {
+      return jsonResult({ stopped: 0, note: "no registered workhorses" });
+    }
+    // Queue directives in one batch, then delete the rows. The
+    // /api/mcp/sync flap-prevention guard (pendingStopSession) keeps
+    // sync.py from re-upserting them before the directive fires.
+    await prisma.agentMessage.createMany({
+      data: workhorses.map((w) => ({
+        projectId: w.projectId,
+        kind: "directive",
+        severity: "info",
+        source: `mcp@${w.host}:${w.sessionName}`,
+        body: "stop_session",
+        payloadJson: null,
+      })),
+    });
+    await prisma.workhorse.deleteMany({
+      where: { id: { in: workhorses.map((w) => w.id) } },
+    });
+    return jsonResult({
+      stopped: workhorses.length,
+      hosts: Array.from(new Set(workhorses.map((w) => w.host))),
+    });
+  },
+};
+
 const removeWorkhorse: ToolDefinition = {
   name: "remove_workhorse",
   description:
@@ -1299,4 +1422,6 @@ export const writeTools: ToolDefinition[] = [
   createMetricDefinition,
   refreshRepo,
   removeWorkhorse,
+  dispatchWorkhorseSession,
+  stopAllWorkhorses,
 ];

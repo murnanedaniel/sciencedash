@@ -105,6 +105,41 @@ export async function removeWorkhorseAction(formData: FormData): Promise<void> {
   revalidatePath(`/projects/${w.projectId}`);
 }
 
+/**
+ * Bulk kill switch — queue `stop_session` directives for every Workhorse
+ * row and optimistically delete the rows. Pair with chat's auto-fire
+ * autonomy: when the brain hallucinates a spawn, one click takes it all
+ * back. No-op when nothing is registered.
+ */
+export async function stopAllWorkhorsesAction(): Promise<void> {
+  const workhorses = await prisma.workhorse.findMany({
+    select: { id: true, host: true, projectId: true, sessionName: true },
+  });
+  if (workhorses.length === 0) {
+    revalidatePath("/");
+    revalidatePath("/settings");
+    return;
+  }
+  await prisma.agentMessage.createMany({
+    data: workhorses.map((w) => ({
+      projectId: w.projectId,
+      kind: "directive",
+      severity: "info",
+      source: `dashboard@${w.host}:${w.sessionName}`,
+      body: "stop_session",
+      payloadJson: null,
+    })),
+  });
+  await prisma.workhorse.deleteMany({
+    where: { id: { in: workhorses.map((w) => w.id) } },
+  });
+  revalidatePath("/");
+  revalidatePath("/settings");
+  for (const w of workhorses) {
+    revalidatePath(`/projects/${w.projectId}`);
+  }
+}
+
 export async function markMessageReadAction(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) return;

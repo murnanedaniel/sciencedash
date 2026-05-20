@@ -455,6 +455,202 @@ def _stop_session(
     return result
 
 
+def _render_chat_context(project_id: str) -> str:
+    """Per-project CHAT_CONTEXT.md, mirroring the template in setup.sh.
+
+    Kept in sync with setup.sh by convention; when one changes the other
+    should too. The template is short enough that the duplication is
+    cheap and keeps sync.py free of dashboard-API round trips at
+    workhorse-spawn time.
+    """
+    return f"""# ScienceDash chat-with-project context
+
+You are in a ScienceDash project workspace on a remote workhorse host.
+The user's research project has live state in the ScienceDash dashboard
+DB — runs, hypotheses, decisions, literature notes, agent messages.
+
+## Default behaviour
+
+When the user asks about **the project's state, hypotheses, runs,
+decisions, recent literature, brain output, or workhorses**, use the
+`mcp__sciencedash__*` tools — these read the live DB. Do NOT infer
+project state from git history, file contents, or directory structure
+unless explicitly asked about the codebase.
+
+When asked about **the codebase or to edit files**, use Bash / Read /
+Write / Edit / Glob / Grep as you normally would.
+
+## This project's id
+
+`{project_id}`
+
+Examples:
+- `mcp__sciencedash__get_entity(kind="project", id="{project_id}")`
+- `mcp__sciencedash__query_entity(kind="run", filters={{"projectId": "{project_id}"}})`
+- `mcp__sciencedash__post_message(projectId="{project_id}", body=…, severity=…)`
+- `mcp__sciencedash__create_check_in(projectId="{project_id}", body=…)`
+
+## Voice contract
+
+Be terse and decision-shaped — match the dashboard's tone.
+"""
+
+
+def _start_session(
+    project_id: str,
+    session_name: str,
+    repo: str,
+    initial_prompt: str | None,
+    host: str,
+    dashboard_url: str,
+    auth_headers: dict[str, str],
+    root: Path,
+) -> dict[str, Any]:
+    """Honor a `start_session` directive: register a project on this
+    host and spin up its Claude tmux session.
+
+    End-to-end on one host:
+      1. mkdir project_dir + session_dir under `root`.
+      2. Write mcp-config.json (replicates setup.sh's per-session block)
+         so the spawned Claude session can call ScienceDash MCP tools.
+      3. Write CHAT_CONTEXT.md if missing.
+      4. Merge the project into config.json so subsequent ticks beat
+         for it via /api/mcp/sync.
+      5. tmux new-session -d running `claude --mcp-config <...>
+         --append-system-prompt "$(cat CHAT_CONTEXT.md)"` in the repo.
+      6. If an initial prompt was provided, send-keys it after a short
+         delay so the freshly-started Claude REPL has rendered.
+
+    Idempotent: re-spawning kills any existing session with the same
+    name first so the user always gets a fresh Claude on this entry
+    point. config.json is replace-by-projectId, so other projects on
+    this host stay intact.
+    """
+    result: dict[str, Any] = {"session": session_name, "projectId": project_id}
+
+    if not shutil.which("tmux"):
+        return {"ok": False, "error": "tmux not on PATH"}
+    if not shutil.which("claude"):
+        return {"ok": False, "error": "claude CLI not on PATH"}
+    if not repo or not isinstance(repo, str):
+        return {"ok": False, "error": "start_session payload missing `repo`"}
+
+    repo_path = os.path.expanduser(repo)
+    if not os.path.isdir(repo_path):
+        return {"ok": False, "error": f"repo not found on host: {repo_path}"}
+
+    project_dir = root / project_id
+    session_dir = project_dir / session_name
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    # mcp-config.json — per-session, baked with the bearer token from
+    # auth.env (passed in as auth_headers by the caller). 0o600 perms.
+    mcp_path = session_dir / "mcp-config.json"
+    headers = {"X-Workhorse-Id": f"{host}:{session_name}"}
+    headers.update(auth_headers)
+    mcp_path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "sciencedash": {
+                        "type": "http",
+                        "url": f"{dashboard_url.rstrip('/')}/api/mcp",
+                        "headers": headers,
+                    }
+                }
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    mcp_path.chmod(0o600)
+
+    ctx_path = project_dir / "CHAT_CONTEXT.md"
+    if not ctx_path.exists():
+        ctx_path.write_text(_render_chat_context(project_id))
+
+    # Merge entry into config.json (replace-by-projectId).
+    cfg_path = root / "config.json"
+    try:
+        with open(cfg_path) as f:
+            on_disk = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        on_disk = {"projects": []}
+    if "projects" not in on_disk or not isinstance(on_disk.get("projects"), list):
+        on_disk["projects"] = []
+    on_disk["projects"] = [
+        p for p in on_disk["projects"] if p.get("projectId") != project_id
+    ]
+    on_disk["projects"].append(
+        {
+            "projectId": project_id,
+            "sessionName": session_name,
+            "repo": repo_path,
+        }
+    )
+    with open(cfg_path, "w") as f:
+        json.dump(on_disk, f, indent=2)
+        f.write("\n")
+    result["registered"] = True
+
+    # Kill any pre-existing session with this name. `start_session` means
+    # "fresh Claude on this entry point" — don't silently re-use whatever
+    # was there.
+    subprocess.run(
+        ["tmux", "kill-session", "-t", f"={session_name}"],
+        check=False,
+        capture_output=True,
+    )
+
+    inner = (
+        f"cd {shlex.quote(repo_path)} && "
+        f"claude --mcp-config {shlex.quote(str(mcp_path))} "
+        f'--append-system-prompt "$(cat {shlex.quote(str(ctx_path))} 2>/dev/null)"'
+    )
+    try:
+        subprocess.run(
+            ["tmux", "new-session", "-d", "-s", session_name, inner],
+            check=True,
+            capture_output=True,
+            timeout=15,
+        )
+    except subprocess.CalledProcessError as e:
+        result["ok"] = False
+        result["tmuxError"] = e.stderr.decode("utf-8", "replace")[:200]
+        return result
+    except subprocess.TimeoutExpired:
+        result["ok"] = False
+        result["tmuxError"] = "tmux start timed out"
+        return result
+    result["spawned"] = True
+
+    if initial_prompt and isinstance(initial_prompt, str) and initial_prompt.strip():
+        # Give Claude time to render its prompt before keys land; sending
+        # too early drops the input on the shell prompt and it's lost.
+        time.sleep(4)
+        try:
+            subprocess.run(
+                ["tmux", "send-keys", "-t", session_name, "-l", initial_prompt],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t", session_name, "Enter"],
+                check=True,
+                capture_output=True,
+                timeout=5,
+            )
+            result["promptSent"] = True
+        except subprocess.CalledProcessError as e:
+            result["promptError"] = e.stderr.decode("utf-8", "replace")[:200]
+        except subprocess.TimeoutExpired:
+            result["promptError"] = "send-keys timed out"
+
+    result["ok"] = True
+    return result
+
+
 # ----------------------------- main loop --------------------------------- #
 
 
@@ -666,9 +862,14 @@ def _main_inner(root: Path) -> int:
     if "dashboard_url" not in cfg or "host" not in cfg or "projects" not in cfg:
         sys.stderr.write("config missing required fields: dashboard_url, host, projects\n")
         return 2
-    projects = cfg["projects"]
-    if not isinstance(projects, list) or not projects:
-        sys.stderr.write("config.projects must be a non-empty list\n")
+    # `projects` may be empty when sync.py is running purely to listen
+    # for `start_session` host-directives (a fresh host with no projects
+    # yet, but bootstrapped sync.py). That's a valid state — sync_one_project
+    # below simply iterates an empty list, and the host-sync poll handles
+    # the registration directive that pulls in the first project.
+    projects = cfg.get("projects") or []
+    if not isinstance(projects, list):
+        sys.stderr.write("config.projects must be a list\n")
         return 2
 
     lock_path = root / "sync.lock"
@@ -681,12 +882,81 @@ def _main_inner(root: Path) -> int:
             (root / "active-host.txt").write_text(socket.gethostname() + "\n")
         except OSError:
             pass
-        for project_cfg in projects:
+        # Host-level directive poll. Pulls `start_session` directives
+        # addressed to this host (any session) that aren't yet known to
+        # this host's config.json. Run BEFORE the per-project loop so a
+        # newly-registered project gets its first heartbeat in the same
+        # tick.
+        try:
+            _pull_host_directives(cfg, root)
+        except Exception as e:  # noqa: BLE001
+            _log(root / "sync.log", f"[host-sync] uncaught: {e!r}")
+        # Re-read config.json — _pull_host_directives may have merged
+        # new projects into it, and we want sync_one_project to see them
+        # in the same tick.
+        projects_now = []
+        try:
+            projects_now = load_config(root).get("projects") or []
+        except SystemExit:
+            projects_now = projects
+        for project_cfg in projects_now:
             try:
                 sync_one_project(cfg, project_cfg, root)
             except Exception as e:  # noqa: BLE001
                 _log(root / "sync.log", f"[{project_cfg.get('projectId', '?')}] uncaught: {e!r}")
     return 0
+
+
+def _pull_host_directives(cfg: dict[str, Any], root: Path) -> None:
+    """POST to /api/mcp/host-sync and execute any returned directives.
+
+    Currently the only host-level directive is `start_session`; the
+    endpoint filters server-side so other directive bodies stay on the
+    per-project channel.
+    """
+    sync_url = cfg["dashboard_url"].rstrip("/") + "/api/mcp/host-sync"
+    auth_headers = _load_auth_headers(root)
+    log_path = root / "sync.log"
+    try:
+        resp = post_json(
+            sync_url,
+            {"host": cfg["host"], "activeHost": socket.gethostname()},
+            extra_headers=auth_headers,
+        )
+    except RuntimeError as e:
+        _log(log_path, f"[host-sync] POST failed: {e}")
+        return
+    directives = resp.get("directives") or []
+    if not directives:
+        return
+    _log(log_path, f"[host-sync] received {len(directives)} directive(s)")
+    for d in directives:
+        if d.get("body") != "start_session":
+            _log(log_path, f"[host-sync] skipping non-start directive: {d.get('body')!r}")
+            continue
+        project_id = d.get("projectId") or ""
+        if not project_id:
+            continue
+        session_name = f"sd-{project_id[:10]}"
+        payload: dict[str, Any] = {}
+        if d.get("payloadJson"):
+            try:
+                payload = json.loads(d["payloadJson"])
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
+        repo = payload.get("repo") or ""
+        initial_prompt = payload.get("initialPrompt")
+        result = _start_session(
+            project_id=project_id,
+            session_name=session_name,
+            repo=repo,
+            initial_prompt=initial_prompt if isinstance(initial_prompt, str) else None,
+            host=cfg["host"],
+            dashboard_url=cfg["dashboard_url"],
+            auth_headers=auth_headers,
+            root=root,
+        )
+        _log(log_path, f"[host-sync] start_session {project_id} -> {result}")
 
 
 def _now_iso() -> str:
