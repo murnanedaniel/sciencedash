@@ -536,8 +536,16 @@ def _start_session(
         return {"ok": False, "error": "start_session payload missing `repo`"}
 
     repo_path = os.path.expanduser(repo)
-    if not os.path.isdir(repo_path):
-        return {"ok": False, "error": f"repo not found on host: {repo_path}"}
+    # mkdir -p the workspace if missing. The standard bootstrap pattern is
+    # "claude clones the upstream repo into an empty workdir" — so a
+    # missing dir is a normal first-dispatch state, not an error. Fail
+    # loudly only if the path exists as a non-directory or mkdir errors.
+    if os.path.exists(repo_path) and not os.path.isdir(repo_path):
+        return {"ok": False, "error": f"repo path exists but is not a directory: {repo_path}"}
+    try:
+        os.makedirs(repo_path, exist_ok=True)
+    except OSError as e:
+        return {"ok": False, "error": f"failed to create repo dir {repo_path}: {e}"}
 
     project_dir = root / project_id
     session_dir = project_dir / session_name
@@ -957,6 +965,66 @@ def _pull_host_directives(cfg: dict[str, Any], root: Path) -> None:
             root=root,
         )
         _log(log_path, f"[host-sync] start_session {project_id} -> {result}")
+        # Surface failures back to the dashboard. /api/mcp/host-sync marks
+        # directives read on delivery, so without this the user (and chat)
+        # never see post-delivery errors — the dispatch silently vanishes.
+        if not result.get("ok"):
+            _post_workhorse_alert(
+                dashboard_url=cfg["dashboard_url"],
+                auth_headers=auth_headers,
+                project_id=project_id,
+                host=cfg["host"],
+                session_name=session_name,
+                error=str(result.get("error") or "unknown error"),
+                repo=repo,
+                log_path=log_path,
+            )
+
+
+def _post_workhorse_alert(
+    dashboard_url: str,
+    auth_headers: dict[str, str],
+    project_id: str,
+    host: str,
+    session_name: str,
+    error: str,
+    repo: str,
+    log_path: Path,
+) -> None:
+    """Post a blocker AgentMessage when start_session fails post-delivery.
+    The host-sync endpoint marks directives read at delivery time, so
+    without this the failure is invisible everywhere except sync.log on
+    the workhorse host. Best-effort: a failed POST here just logs and
+    moves on — we never want a notification error to crash the sync loop.
+    """
+    url = dashboard_url.rstrip("/") + "/api/mcp"
+    body_md = (
+        f"**Workhorse dispatch failed on `{host}`.**\n\n"
+        f"- Session: `{session_name}`\n"
+        f"- Repo path requested: `{repo}`\n"
+        f"- Error: `{error}`\n\n"
+        f"The `start_session` directive was consumed but couldn't launch. "
+        f"Re-dispatch with a corrected payload to retry."
+    )
+    rpc_body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "post_message",
+            "arguments": {
+                "projectId": project_id,
+                "body": body_md,
+                "kind": "alert",
+                "severity": "blocker",
+                "source": f"workhorse@{host}:{session_name}",
+            },
+        },
+    }
+    try:
+        post_json(url, rpc_body, extra_headers=auth_headers, timeout=15.0)
+    except RuntimeError as e:
+        _log(log_path, f"[host-sync] failed to post failure alert: {e}")
 
 
 def _now_iso() -> str:
