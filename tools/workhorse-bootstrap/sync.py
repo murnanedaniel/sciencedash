@@ -364,12 +364,17 @@ def _revive_session(
 
     # Inner shell command. Note: tmux runs this through the user's
     # default shell, so $(cat …) substitution happens at session start.
+    # --dangerously-skip-permissions: workhorses are unattended; the
+    # /settings kill switch is the recovery handle, not interactive
+    # prompts.
     inner = (
         f"cd {shlex.quote(cwd)} && ("
         f"claude --continue --mcp-config {shlex.quote(str(mcp_path))} "
+        f"--dangerously-skip-permissions "
         f'--append-system-prompt "$(cat {shlex.quote(str(ctx_path))} 2>/dev/null)" '
         f"2>/dev/null || "
         f"claude --mcp-config {shlex.quote(str(mcp_path))} "
+        f"--dangerously-skip-permissions "
         f'--append-system-prompt "$(cat {shlex.quote(str(ctx_path))} 2>/dev/null)"'
         f")"
     )
@@ -610,9 +615,14 @@ def _start_session(
         capture_output=True,
     )
 
+    # --dangerously-skip-permissions: workhorses run unattended in tmux;
+    # the kill switch on /settings is the recovery handle, not interactive
+    # permission prompts. Without this, the session stalls on the first
+    # MCP / Bash / Edit call waiting for a "1/Yes" that never comes.
     inner = (
         f"cd {shlex.quote(repo_path)} && "
         f"claude --mcp-config {shlex.quote(str(mcp_path))} "
+        f"--dangerously-skip-permissions "
         f'--append-system-prompt "$(cat {shlex.quote(str(ctx_path))} 2>/dev/null)"'
     )
     try:
