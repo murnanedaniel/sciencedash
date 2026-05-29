@@ -1,6 +1,7 @@
 import { SidebarLink } from "@/components/SidebarLink";
 import { CommandPalette } from "@/components/CommandPalette";
 import { HelpButton } from "@/components/HelpButton";
+import { SyncHealthPill } from "@/components/SyncHealthPill";
 import { prisma } from "@/lib/prisma";
 
 // Every dashboard page reads live data from SQLite. Opt out of Next's
@@ -34,6 +35,7 @@ export default async function DashLayout({
   return (
     <div className="shell">
       <aside className="sidebar">
+        <SyncHealthPill />
         <nav className="navStack">
           <SidebarLink href="/" label="Today" hotkey="g T" />
           <SidebarLink href="/chat" label="Chat" hotkey="g C" />
