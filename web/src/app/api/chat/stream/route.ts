@@ -151,9 +151,9 @@ export async function POST(req: NextRequest) {
     dashboardUrl: dashboardOrigin,
     token,
   });
-  // The SDK ships a Linux musl binary inside its node_modules; on the
-  // homebox (and most dev machines) the user has their own `claude`
-  // CLI installed elsewhere. Without an explicit pathToClaudeCodeExecutable
+  // The SDK ships a Linux musl binary inside its node_modules; on most
+  // dev machines the user has their own `claude` CLI installed
+  // elsewhere. Without an explicit pathToClaudeCodeExecutable
   // the SDK 404s on the bundled binary. Reuse the resolver agentClient
   // already trusts for the brain / heartbeats.
   const claudePath = await resolveClaudePath();

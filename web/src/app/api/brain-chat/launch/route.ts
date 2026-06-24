@@ -14,12 +14,12 @@ export const dynamic = "force-dynamic";
  * Usage from the user's terminal:
  *
  *   curl -fsSL -H "Authorization: Bearer <TOKEN>" \
- *     https://homebox.tail598781.ts.net/api/brain-chat/launch | bash
+ *     https://your-dashboard-host.example.com/api/brain-chat/launch | bash
  *
  * The Bearer token from the curl request is mirrored back into the
  * `.mcp.json` the script writes — the chat Claude calls /api/mcp using
  * the same token, so the proxy lets it through. Token never leaves the
- * user's shell environment / the homebox server-side render.
+ * user's shell environment / the dashboard's server-side render.
  *
  * Auth: gated by the proxy (Bearer required for non-HTML requests).
  */

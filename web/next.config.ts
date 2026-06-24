@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
   // and HMR work across the proxy hop.
   //
   // Comma-separated SCIENCEDASH_ALLOWED_DEV_ORIGINS lets each deployment
-  // (laptop dev / homebox / future hosts) extend the list without code
+  // (laptop dev / server / future hosts) extend the list without code
   // edits.
   allowedDevOrigins: [
     "localhost",

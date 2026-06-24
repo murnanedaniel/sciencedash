@@ -35,7 +35,8 @@ fi
 fnm use 20.19.0 >/dev/null 2>&1 || fnm use default >/dev/null 2>&1 || true
 
 # --- Run --------------------------------------------------------------------
-cd "$HOME/Research/ScienceDash/web"
+# Override SCIENCEDASH_REPO_ROOT if your checkout isn't at ~/sciencedash.
+cd "${SCIENCEDASH_REPO_ROOT:-$HOME/sciencedash}/web"
 
 # Install deps if missing (covers fresh machines and new dep additions).
 if [ ! -d "node_modules" ] || [ ! -d "node_modules/next" ]; then
@@ -66,7 +67,9 @@ if ss -ltn 2>/dev/null | grep -q ':3000 '; then
   echo "Dev server already running on :3000 — leaving it alone."
 fi
 
-# Bring up the Cloudflare tunnel so workhorses can reach dash.science.
+# Bring up the Cloudflare tunnel (named "sciencedash") so remote workhorses
+# can reach this dashboard over a public hostname. Optional — only runs if
+# cloudflared is installed and a tunnel named "sciencedash" is configured.
 # Skip if one is already running. Killed on script exit so the tunnel
 # lifecycle matches the dashboard window — but only if we are also
 # starting the dev server, otherwise the previous launcher owns it.

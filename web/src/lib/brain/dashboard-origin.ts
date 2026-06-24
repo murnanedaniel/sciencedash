@@ -6,7 +6,7 @@ import { headers } from "next/headers";
  * scripts that will run on the user's local machine.
  *
  * Order of preference:
- *   1. SCIENCEDASH_BASE_URL env (canonical for the homebox)
+ *   1. SCIENCEDASH_BASE_URL env (canonical, set per deployment)
  *   2. X-Forwarded-{Host,Proto} headers set by the reverse proxy
  *      (cloudflared / Tailscale Funnel)
  *   3. Host header

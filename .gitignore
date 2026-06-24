@@ -2,6 +2,12 @@
 # local dev helpers (seed scripts, scratch)
 /web/seed-from-seedmd.mjs
 
+# personal chat context — ships as user_brief.example.md; the real one is private
+/tools/chat-context/user_brief.md
+
+# private design memo — not part of the public project
+/seed.md
+
 # python bytecode (workhorse-bootstrap is invoked as a script, no install)
 __pycache__/
 

@@ -1,18 +1,9 @@
 import { NextResponse } from "next/server";
 import { spawn } from "node:child_process";
-import path from "node:path";
 import os from "node:os";
+import { autoDeployEnabled, deployScript } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
-
-const DEPLOY_SCRIPT = path.join(
-  os.homedir(),
-  "Research",
-  "ScienceDash",
-  "tools",
-  "auto-deploy",
-  "deploy.sh",
-);
 
 /**
  * POST /api/deploy/trigger — manually invoke deploy.sh. Same script the
@@ -27,8 +18,14 @@ const DEPLOY_SCRIPT = path.join(
  * any other API route — no extra check needed here.
  */
 export async function POST() {
+  if (!autoDeployEnabled()) {
+    return NextResponse.json(
+      { triggered: false, error: "auto-deploy is disabled" },
+      { status: 403 },
+    );
+  }
   try {
-    const child = spawn("bash", [DEPLOY_SCRIPT], {
+    const child = spawn("bash", [deployScript()], {
       detached: true,
       stdio: "ignore",
       cwd: os.homedir(),

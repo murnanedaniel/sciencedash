@@ -8,9 +8,9 @@ OnBootSec=60
 # overlap even if a deploy takes longer than the interval.
 OnUnitActiveSec=90
 Unit=sciencedash-deploy.service
-# RandomizedDelaySec stops every homebox-class machine on the planet from
-# polling at the same epoch second; for a 1-machine deployment it's a
-# trivial nice-to-have, costs nothing.
+# RandomizedDelaySec stops every machine on the planet from polling at the
+# same epoch second; for a 1-machine deployment it's a trivial nice-to-have,
+# costs nothing.
 RandomizedDelaySec=10
 
 [Install]

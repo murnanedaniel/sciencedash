@@ -5,9 +5,9 @@
   "_comment_projects": "One entry per project active on this host. projectId is the ScienceDash project's cuid; sessionName is the tmux session that runs Claude Code (convention: sd-<projectId>); repo is the absolute path to the project's local repo (so 'revive_session' knows where to cd).",
   "projects": [
     {
-      "projectId": "cmockitum0000inhl902oph6w",
-      "sessionName": "sd-cmockitum0000inhl902oph6w",
-      "repo": "/global/homes/m/murnanedaniel/research/tracking-review"
+      "projectId": "<your-project-cuid>",
+      "sessionName": "sd-<your-project-cuid>",
+      "repo": "/path/to/your/project/repo"
     }
   ]
 }

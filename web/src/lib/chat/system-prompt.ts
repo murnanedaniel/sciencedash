@@ -59,7 +59,7 @@ async function loadUserBrief(): Promise<string> {
   try {
     return await readFile(briefPath, "utf-8");
   } catch {
-    return "# User brief\n\n_(No user_brief.md yet — see tools/chat-context/user_brief.md to fill this in.)_\n";
+    return "# User brief\n\n_(No user_brief.md yet — copy tools/chat-context/user_brief.example.md to user_brief.md and fill it in.)_\n";
   }
 }
 

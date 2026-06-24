@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 #
 # One-shot installer for the ScienceDash auto-deploy timer. Run this on
-# the homebox once. Idempotent — re-running it just refreshes the unit
-# files in case they've changed.
+# your dashboard server once. Idempotent — re-running it just refreshes the
+# unit files in case they've changed.
 #
 # Prereqs:
 #   - gh CLI installed and authenticated (gh auth login, web flow)
 #   - the existing sciencedash.service (the dev server) already running
 #   - fnm + Node 22 set up
-#   - this repo cloned at ~/Research/ScienceDash
+#   - this repo cloned somewhere; set SCIENCEDASH_REPO_ROOT if it isn't at
+#     ~/sciencedash, and SCIENCEDASH_REPO_SLUG to your-org/your-repo
+#   - edit sciencedash-deploy.service's ExecStart/Environment to match
 #
 # Usage:
-#   bash ~/Research/ScienceDash/tools/auto-deploy/install.sh
+#   bash <repo>/tools/auto-deploy/install.sh
 
 set -euo pipefail
 
 SRC=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 DEST="$HOME/.config/systemd/user"
+REPO_ROOT="${SCIENCEDASH_REPO_ROOT:-$HOME/sciencedash}"
 
 echo "Installing auto-deploy units → $DEST"
 mkdir -p "$DEST"
@@ -38,10 +41,10 @@ else
   fi
 fi
 
-if [ -f "$HOME/Research/ScienceDash/web/.env" ]; then
-  echo "  ✓ ~/Research/ScienceDash/web/.env present"
+if [ -f "$REPO_ROOT/web/.env" ]; then
+  echo "  ✓ $REPO_ROOT/web/.env present"
 else
-  echo "  ⚠ ~/Research/ScienceDash/web/.env missing — auth will fail at restart"
+  echo "  ⚠ $REPO_ROOT/web/.env missing — auth will fail at restart"
 fi
 
 echo

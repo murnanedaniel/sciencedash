@@ -21,7 +21,7 @@ jobs:
       run:
         working-directory: web
     # Build-time dummy values for env vars that lib/auth.ts reads. Real
-    # values live in homebox .env at runtime — never in CI.
+    # values live in the deployment's .env at runtime — never in CI.
     env:
       DATABASE_URL: "file:./.tmp.db"
       SCIENCEDASH_SESSION_SECRET: "ci-dummy-session-secret"

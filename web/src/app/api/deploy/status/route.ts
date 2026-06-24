@@ -1,21 +1,19 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { autoDeployEnabled, repoRoot, repoSlug, stateDir } from "@/lib/config";
 
 const execFileP = promisify(execFile);
 
 export const dynamic = "force-dynamic";
 
-const REPO_ROOT = path.join(os.homedir(), "Research", "ScienceDash");
-const LAST_DEPLOY_FILE = path.join(os.homedir(), ".sciencedash", "last-deploy");
-const REPO_SLUG = "murnanedaniel/ScienceDash";
-
 type CiStatus = "passed" | "pending" | "failed" | "no-runs" | "error";
 
 type StatusResult = {
+  /** Whether auto-deploy is configured at all. False on a stock public clone. */
+  enabled: boolean;
   /** SHA currently checked out in the repo on disk (live HEAD). */
   currentSha: string | null;
   /** Most recent successful auto-deploy. Null until the timer's run once. */
@@ -29,6 +27,17 @@ type StatusResult = {
 };
 
 export async function GET(): Promise<NextResponse<StatusResult>> {
+  if (!autoDeployEnabled()) {
+    return NextResponse.json({
+      enabled: false,
+      currentSha: null,
+      lastDeploy: null,
+      ciStatus: "no-runs",
+      remoteSha: null,
+      pending: false,
+    });
+  }
+
   const [currentSha, lastDeploy, remoteSha] = await Promise.all([
     readCurrentSha(),
     readLastDeploy(),
@@ -39,6 +48,7 @@ export async function GET(): Promise<NextResponse<StatusResult>> {
   const ciStatus = ciTargetSha ? await fetchCiStatus(ciTargetSha) : "error";
 
   return NextResponse.json({
+    enabled: true,
     currentSha,
     lastDeploy,
     ciStatus,
@@ -51,7 +61,7 @@ export async function GET(): Promise<NextResponse<StatusResult>> {
 async function readCurrentSha(): Promise<string | null> {
   try {
     const { stdout } = await execFileP("git", ["rev-parse", "HEAD"], {
-      cwd: REPO_ROOT,
+      cwd: repoRoot(),
     });
     return stdout.trim();
   } catch {
@@ -61,7 +71,8 @@ async function readCurrentSha(): Promise<string | null> {
 
 async function readLastDeploy(): Promise<{ sha: string; at: string } | null> {
   try {
-    const raw = (await fs.readFile(LAST_DEPLOY_FILE, "utf-8")).trim();
+    const lastDeployFile = path.join(stateDir(), "last-deploy");
+    const raw = (await fs.readFile(lastDeployFile, "utf-8")).trim();
     const [sha, ...rest] = raw.split(/\s+/);
     if (!sha) return null;
     return { sha, at: rest.join(" ") };
@@ -78,11 +89,11 @@ async function readLastDeploy(): Promise<{ sha: string; at: string } | null> {
  */
 async function fetchRemoteSha(): Promise<string | null> {
   await execFileP("git", ["fetch", "origin", "main", "--quiet"], {
-    cwd: REPO_ROOT,
+    cwd: repoRoot(),
   }).catch(() => null);
   try {
     const { stdout } = await execFileP("git", ["rev-parse", "origin/main"], {
-      cwd: REPO_ROOT,
+      cwd: repoRoot(),
     });
     return stdout.trim();
   } catch {
@@ -94,10 +105,12 @@ async function fetchCiStatus(sha: string): Promise<CiStatus> {
   // gh CLI uses the user's stored credentials at ~/.config/gh — set up
   // once via `gh auth login`. The query path matches what deploy.sh
   // uses so the widget shows what the gate sees.
+  const slug = repoSlug();
+  if (!slug) return "no-runs";
   try {
     const { stdout } = await execFileP("gh", [
       "api",
-      `repos/${REPO_SLUG}/commits/${sha}/check-runs?per_page=100`,
+      `repos/${slug}/commits/${sha}/check-runs?per_page=100`,
       "--jq",
       // Same expression as in deploy.sh — keep them in sync.
       'if (.check_runs | length) == 0 then "no-runs"' +

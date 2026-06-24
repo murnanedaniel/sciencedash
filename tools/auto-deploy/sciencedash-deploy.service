@@ -4,8 +4,13 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-# %h expands to $HOME at runtime (e.g. /home/murnanedaniel)
-ExecStart=%h/Research/ScienceDash/tools/auto-deploy/deploy.sh
+# %h expands to $HOME at runtime. Edit this path if your checkout isn't at
+# ~/sciencedash, and keep it in sync with SCIENCEDASH_REPO_ROOT below.
+ExecStart=%h/sciencedash/tools/auto-deploy/deploy.sh
+# REQUIRED: your-org/your-repo for CI gating; and your checkout path if it
+# isn't ~/sciencedash. deploy.sh refuses to run without the slug.
+Environment=SCIENCEDASH_REPO_SLUG=your-org/your-repo
+Environment=SCIENCEDASH_REPO_ROOT=%h/sciencedash
 # Ensure the script can find fnm / gh / claude when systemd runs us with
 # a thin PATH. The script also fixes PATH internally; this is belt+braces.
 Environment=PATH=%h/.local/share/fnm/aliases/default/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin

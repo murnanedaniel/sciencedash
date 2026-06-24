@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 type CiStatus = "passed" | "pending" | "failed" | "no-runs" | "error";
 
 type StatusResult = {
+  enabled: boolean;
   currentSha: string | null;
   lastDeploy: { sha: string; at: string } | null;
   ciStatus: CiStatus;
@@ -74,6 +75,9 @@ export function DeployStatusWidget() {
       </div>
     );
   }
+
+  // Auto-deploy is author-specific tooling, off by default on a public clone.
+  if (data.enabled === false) return null;
 
   const ci = CI_PILL_STYLE[data.ciStatus];
 

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# ScienceDash pre-commit secret guard. Blocks a commit if staged content
+# looks like it contains a secret or a private deployment identifier. Install
+# with tools/secret-scan/install.sh. Self-contained — gitleaks is used too if
+# it happens to be installed, but the grep below needs no dependencies.
+
+set -uo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+fail=0
+note() { echo "  ✗ $*" >&2; fail=1; }
+
+# Patterns that should never be committed. Env-secret assignments are only
+# flagged when they have a NON-empty value (so .env.example's ="" passes).
+while IFS= read -r file; do
+  # Skip the example/template files and this hook itself.
+  case "$file" in
+    *.example|*.example.*|tools/secret-scan/*) continue ;;
+  esac
+
+  added=$(git diff --cached -U0 -- "$file" | grep '^+' | grep -v '^+++')
+
+  echo "$added" | grep -E \
+    '(SCIENCEDASH_AUTH_TOKEN|SCIENCEDASH_SESSION_SECRET|SCIENCEDASH_PASSWORD_SALT|SCIENCEDASH_AUTH_PASSWORD_HASH|WANDB_API_KEY|GITHUB_PAT)\s*[:=]\s*["'"'"']?[A-Za-z0-9_./+-]{8,}' \
+    >/dev/null && note "$file: looks like a real secret value assigned to an env var"
+
+  echo "$added" | grep -E 'ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+    >/dev/null && note "$file: looks like a token or private key"
+
+  echo "$added" | grep -E 'tail598781|\.ts\.net|dash\.science' \
+    >/dev/null && note "$file: contains a private deployment hostname"
+done <<< "$staged"
+
+# Belt-and-suspenders: if gitleaks is installed, run it on the staged diff.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --no-banner 2>/dev/null || {
+    echo "  ✗ gitleaks flagged staged changes" >&2
+    fail=1
+  }
+fi
+
+if [ "$fail" = "1" ]; then
+  echo "" >&2
+  echo "pre-commit: refusing to commit — see flags above." >&2
+  echo "If it's a false positive, commit with --no-verify (and double-check!)." >&2
+  exit 1
+fi
+exit 0

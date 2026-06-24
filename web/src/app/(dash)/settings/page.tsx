@@ -12,6 +12,7 @@ import {
 } from "@/lib/server/settingsActions";
 import { toggleAiAutoReview } from "@/lib/server/projectActions";
 import { detectClaudeCode } from "@/lib/ai/client";
+import { autoDeployEnabled } from "@/lib/config";
 import { PromptKind } from "@/generated/prisma/client";
 
 const PROMPT_LABELS: Record<PromptKind, string> = {
@@ -160,7 +161,7 @@ export default async function SettingsPage() {
       </header>
 
       <div className="stack">
-        <DeployStatusWidget />
+        {autoDeployEnabled() && <DeployStatusWidget />}
 
         {/* Integrations */}
         <div className="card">

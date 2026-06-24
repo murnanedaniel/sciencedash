@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
  * login, Vast box, friend's GPU machine):
  *
  *   bash <(curl -fsSL -H "Authorization: Bearer $TOK" \
- *     "https://homebox.tail598781.ts.net/api/workhorse-bootstrap/launch?projectId=<id>&repo=/path/on/this/host")
+ *     "https://your-dashboard-host.example.com/api/workhorse-bootstrap/launch?projectId=<id>&repo=/path/on/this/host")
  */
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization") ?? "";

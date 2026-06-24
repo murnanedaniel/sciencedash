@@ -16,11 +16,13 @@
 
 set -uo pipefail
 
-REPO_ROOT="$HOME/Research/ScienceDash"
-STATE_DIR="$HOME/.sciencedash"
+# Deployment-specific; override via the systemd unit's Environment= or your
+# shell. REPO_SLUG has no default — CI gating is meaningless without it.
+REPO_ROOT="${SCIENCEDASH_REPO_ROOT:-$HOME/sciencedash}"
+STATE_DIR="${SCIENCEDASH_STATE_DIR:-$HOME/.sciencedash}"
 LOG="$STATE_DIR/deploy.log"
 LAST_DEPLOY_FILE="$STATE_DIR/last-deploy"
-REPO_SLUG="murnanedaniel/ScienceDash"
+REPO_SLUG="${SCIENCEDASH_REPO_SLUG:?set SCIENCEDASH_REPO_SLUG to your-org/your-repo}"
 
 mkdir -p "$STATE_DIR"
 
@@ -38,7 +40,7 @@ fi
 cd "$REPO_ROOT" || { log "ERROR: $REPO_ROOT missing"; exit 1; }
 
 # Always be on main when polling. Drift from main means someone is hand-
-# editing on the homebox; we don't auto-deploy in that state.
+# editing on the server; we don't auto-deploy in that state.
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "$CURRENT_BRANCH" != "main" ]; then
   log "branch is '$CURRENT_BRANCH' (expected main) — skipping; checkout main to resume auto-deploy"

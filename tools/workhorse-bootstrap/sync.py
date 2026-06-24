@@ -141,7 +141,7 @@ def post_json(
     # name. Caller can override via extra_headers.
     headers = {
         "content-type": "application/json",
-        "user-agent": "sciencedash-sync/1 (+https://github.com/murnanedaniel/ScienceDash)",
+        "user-agent": "sciencedash-sync/1",
     }
     if extra_headers:
         headers.update(extra_headers)

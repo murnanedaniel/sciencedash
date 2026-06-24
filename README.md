@@ -15,13 +15,17 @@ Prereqs: **Node ≥ 20.19**, **Claude Code** installed and logged in to your Pro
 ```bash
 cd web
 npm install
-npx prisma migrate dev          # one-time DB setup
+cp .env.example .env             # then fill in the four required auth values (below)
+npx prisma migrate dev           # one-time DB setup
+npm run db:seed                  # optional — sample projects so the dashboard isn't empty
 npm run build && npm run start
 ```
 
 Open <http://localhost:3000>.
 
-Optional environment (in `web/.env.local`):
+**Required auth.** The app refuses to start until four secrets are set in `web/.env`. `web/.env.example` ships a copy-paste one-liner that generates all four (`SCIENCEDASH_AUTH_TOKEN`, `SCIENCEDASH_SESSION_SECRET`, `SCIENCEDASH_PASSWORD_SALT`, `SCIENCEDASH_AUTH_PASSWORD_HASH`) — run it, paste the results, and that's your login password set.
+
+**Optional integrations** (also in `web/.env`):
 
 ```
 WANDB_API_KEY=...        # to ingest run metrics
@@ -29,6 +33,8 @@ GITHUB_PAT=...           # to track repo freshness
 ```
 
 No `ANTHROPIC_API_KEY` — AI features go through Claude Code (`claude login`) so they bill against your subscription. Confirm on `/settings`: **Claude Code** should show a version, not "missing".
+
+ScienceDash runs entirely on `localhost`. To reach it from other devices or to connect remote **workhorse** agents, put it behind a reverse proxy (Tailscale, cloudflared, nginx) and set `SCIENCEDASH_BASE_URL`. See `docs/cluster-integration.md`. Auto-deploy (the `/settings` deploy widget) is author-specific tooling, **off unless** you set `SCIENCEDASH_AUTO_DEPLOY_ENABLED=1`.
 
 ---
 
@@ -109,9 +115,19 @@ There's no migration story for moving between machines — just copy `dev.db` an
 
 ## Project philosophy
 
-Why does this exist and why these specific features? Read `seed.md` (1338 lines) — it's the long-form internal memo that drove every design decision. Section §16 alone is the "research constitution" the dashboard enforces in code.
+ScienceDash exists to keep a single researcher's portfolio honest: it makes you
+declare a metric before you run, log runs against hypotheses, and resolve those
+hypotheses into papers — so you can see whether the random walk is actually
+moving forward. The dashboard enforces a small "research constitution" in code
+(status gates, compute budgets, a decision log). The full rationale and the
+day-to-day guide live in [`docs/tutorial.md`](docs/tutorial.md).
 
-The full design plan with milestone breakdown is at `/root/.claude/plans/carefully-think-through-what-cozy-backus.md` (or wherever the plan file ended up).
+## Docs
+
+- [`docs/tutorial.md`](docs/tutorial.md) — how it actually works, end to end.
+- [`docs/setup-tutorial.md`](docs/setup-tutorial.md) — per-project onboarding.
+- [`docs/cluster-integration.md`](docs/cluster-integration.md) — connecting remote workhorse agents.
+- [`docs/workhorse-protocol.md`](docs/workhorse-protocol.md) — the sync wire protocol.
 
 ## Dev setup, WSL2 launcher, schema regen
 
