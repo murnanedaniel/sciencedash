@@ -1,0 +1,12 @@
+# build output
+dist/
+.astro/
+
+# deps
+node_modules/
+
+# generated docs pages (synced from ../docs at build time — see scripts/sync-docs.mjs)
+src/content/docs/tutorial.md
+src/content/docs/setup.md
+src/content/docs/cluster-integration.md
+src/content/docs/workhorse-protocol.md
