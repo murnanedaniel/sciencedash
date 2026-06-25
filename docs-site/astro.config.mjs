@@ -27,6 +27,7 @@ export default defineConfig({
           items: [
             { label: "Overview", link: "/" },
             { label: "Getting started", link: "/getting-started/" },
+            { label: "Two months of ScienceDash", link: "/changelog/" },
           ],
         },
         {

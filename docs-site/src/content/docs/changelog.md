@@ -1,0 +1,102 @@
+---
+title: Two months of ScienceDash
+description: A changelog reconstructed from git — built in five weeks of evenings, then used every day since.
+---
+
+ScienceDash wasn't planned. It was built in **five weeks of evenings** (23 April –
+29 May 2026), then **used every day for the month after** without a single new
+feature commit — the truest test of whether a tool earns its place. This page is
+the story, reconstructed straight from the git history: what got added, when, and
+what the code reveals about what worked and what didn't.
+
+---
+
+## Act I — Day one (23 April)
+
+The entire spine of the app landed in **one day, 9 commits, ~15,000 lines**:
+
+- **Scaffold + UI** — a working Next.js dashboard from zero (`+8,165`).
+- **M1 — inner loop**: projects → hypotheses → runs → metrics → decisions.
+- **M2 — consolidation**: papers, check-ins, artifacts, reading notes.
+- **M3 — AI critical review**, data ingests, and an in-process worker.
+- **M4 — outer loop**: portfolio, Pareto fronts, the ⌘K palette, strategic audit.
+
+By midnight, the full loop — *idea → metric → runs → paper skeleton → portfolio
+view* — existed and ran. The thesis ("a research OS you open every morning") was
+testable the same day it was conceived.
+
+## Act II — Making it real (24 April)
+
+A day of turning a prototype into something you'd trust:
+
+- **Claude Agent SDK swap** (`+1,079`) — the pivotal call: drop the Anthropic API
+  SDK so AI features bill against a **Claude subscription**, not metered credits.
+  This is *why* there's no `ANTHROPIC_API_KEY` anywhere in the codebase.
+- **Quick-start docs** and **in-app help** (the floating `?` drawer).
+- **The first reversal** (`#4`, `+813/−827`): ripped out the built-in `type`
+  column in favour of free-form **tags**. Almost pure churn — the sign of a
+  design idea being *un*-made once it met real use.
+
+## Act III — The fleet (1–8 May)
+
+The centre of gravity shifted from "a dashboard" to "a dashboard that commands
+remote compute":
+
+- **Workhorse platform v1** (`#7`, `+9,669` in one PR) — cluster integration, an
+  MCP write surface, and the `sync.py` supervisor. A second app's worth of code
+  in a single commit: dispatch Claude Code sessions onto remote hosts and watch
+  them from the sidebar.
+- **Autonomy loops** (`#8`) — a brain heartbeat scheduler + workhorse tick.
+- **Programme** (`#11`) — a first-class layer above projects, for clustering work
+  that shares one publication story.
+- **App-level auth** (`#12`/`#13`) — cookie for browsers, Bearer for machines —
+  so the dashboard could safely live behind a tunnel.
+- **MCP surface, grown then pruned**: `#20` added creation tools; then `#21`
+  **collapsed 13 list/get tools into two** (`query_entity` + `get_entity`,
+  `+734/−494`). A surface sprawling, then deliberately simplified.
+- **brain-chat** (`#15`), **auto-deploy** (`#17`, CI-gated pull timer), and the
+  **workhorse lifecycle** (`#25`–`#28`: graceful remove, stale-directive cleanup).
+
+## Act IV — Hardening (13–29 May)
+
+The features were there; now they had to survive real life. Almost every commit
+in this stretch is a reliability patch on the remote-agent loop:
+
+- `#30` — drop an `insensitive` search mode SQLite doesn't support (the database
+  ceiling biting).
+- `#31` — `start_session` directive + a bulk kill switch.
+- `#32` — a web-native chat surface at `/chat` (`+980`).
+- `#33` — **self-healing dispatch** + surfacing post-delivery failures.
+- `#34` — launch Claude with `--dangerously-skip-permissions` for unattended runs.
+- `#35` — a **`sync.py` health pill** per remote host in the sidebar.
+
+That last one is telling: by the end, the thing most worth building was *visibility
+into whether the remote agents were even alive*. The workhorse fleet was the most
+powerful feature and the most fragile — a theme worth its own attention.
+
+## Act V — Just using it (June)
+
+**Zero feature commits.** A full month of daily use with no changes — the app was
+stable enough to disappear into the work. Built in five weeks, dogfooded for one.
+
+## Today — open source (25 June)
+
+ScienceDash goes public under MIT: the code generic, secrets and personal notes
+scrubbed from history, sample data so a clone opens to a populated dashboard, and
+these docs. The five-week sprint is now something anyone can clone in five minutes.
+
+---
+
+### What the history taught me
+
+Read end to end, the commits confess a few things — and they're the roadmap for
+what comes next:
+
+- **The workhorse/sync loop is the soft spot.** Six separate hardening commits
+  (`#26`, `#27`, `#28`, `#33`, `#34`, `#35`) and it still needs hands-on rescue
+  when a remote login node reboots. Resilience here is the highest-value work left.
+- **Surfaces sprawl, then want pruning** (`#21`). Worth watching the MCP and UI
+  surface for the next consolidation.
+- **SQLite has a ceiling** (`#30`) that search keeps bumping into.
+
+The next chapter is turning those confessions into fixes.
