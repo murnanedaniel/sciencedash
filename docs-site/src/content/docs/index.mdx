@@ -1,14 +1,12 @@
 ---
 title: ScienceDash
-description: A local-first research operating system for turning curiosity into papers.
+description: A local-first research operating system that turns curiosity into papers.
 template: splash
 hero:
   tagline: >-
-    Build small projects, declare a primary metric, log runs against
-    hypotheses — and the dashboard nudges you when something is
-    narrative-ready, stalled, or worth a paper. Runs on your machine. Your
-    data is one SQLite file. AI runs on your Claude subscription, not API
-    credits.
+    The bottleneck in research isn't ideas — it's consolidation. ScienceDash is
+    a local-first operating system that turns curiosity into papers, without
+    losing the curiosity that made them.
   actions:
     # Hero action links are NOT base-prefixed by Starlight — include /sciencedash.
     - text: Get started
@@ -21,34 +19,70 @@ hero:
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
+import RandomWalk from '../../components/diagrams/RandomWalk.astro';
+import ResearchOS from '../../components/diagrams/ResearchOS.astro';
+import Loops from '../../components/diagrams/Loops.astro';
+import Substrate from '../../components/diagrams/Substrate.astro';
 
-## What it is
+## Research drifts
 
-ScienceDash is a single-researcher "operating system" for going from an idea to
-a paper. It keeps the random walk honest: declare what *winning* means before
-you run, log runs against hypotheses, resolve those hypotheses into papers, and
-watch a decision log that shows whether you're actually moving forward.
+For a capable, curious researcher the hard part is no longer having ideas, tools,
+data, or compute. It's **consolidation** — turning exploration into finished,
+visible output. Projects wander off and leave nothing behind; the good ones often
+get pushed over the line by someone else. ScienceDash exists to change the *shape*
+of that walk: keep exploring, but leave a durable artifact at every step.
 
-<CardGrid stagger>
-  <Card title="Inner loop" icon="rocket">
-    Projects → hypotheses → runs → metrics. Declare a primary metric and a
-    compute budget up front; the meter goes amber when you blow past it.
+<RandomWalk />
+
+## A research operating system
+
+ScienceDash structures research as four layers. Each turns the messy output of the
+one above it into something more finished — and a daily ritual plus AI critical
+review keep projects from quietly stalling.
+
+<ResearchOS />
+
+<CardGrid>
+  <Card title="Portfolio" icon="seti:todo">
+    The outer view: what's exploring vs. exploiting, what to promote, what to park.
   </Card>
-  <Card title="Consolidation" icon="open-book">
-    When a hypothesis lands, spawn a six-section paper skeleton, fill it from
-    your runs with an AI first pass, polish per section, export `.tex`.
+  <Card title="Project definition" icon="document">
+    Every idea becomes a trackable object with a hypothesis, a figure of merit, a
+    timeline, and next steps. No project stays a cloud of intention.
   </Card>
-  <Card title="Workhorses" icon="puzzle">
-    Dispatch Claude Code sessions onto remote compute (a GPU box, an HPC login
-    node) over a small sync protocol, and watch their health from the sidebar.
+  <Card title="Fast experiments" icon="rocket">
+    Cheap early signal before big compute. Runs, metrics, and Pareto fronts make
+    "is this working?" answerable at a glance.
   </Card>
-  <Card title="On your terms" icon="approve-check">
-    Local-first: one SQLite file, runs on <code>localhost</code>. AI features
-    bill against your Claude Pro/Max subscription — no <code>ANTHROPIC_API_KEY</code>.
+  <Card title="Writing" icon="pencil">
+    Skeleton first, AI draft, human pass, AI polish. Paper-writing becomes
+    systematic instead of mystical.
   </Card>
 </CardGrid>
 
+## The loop: idea → paper
+
+Declare a metric and a compute budget *before* you run. Log runs against
+hypotheses. When a hypothesis lands, spawn a paper skeleton and fill it from your
+own runs. Every resolution, paper, and accepted edit writes to a decision log — so
+you can see whether the walk is moving forward.
+
+<Loops />
+
+## Claude-native, not another agent
+
+ScienceDash is a **cockpit and portfolio brain — not an agent runtime**. Your
+Claude Code sessions do the work; ScienceDash holds the cross-cutting state no
+single session can. One MCP substrate is read and written by every session alike:
+dashboard buttons, your local terminal, and long-running workhorses on remote
+compute. The axiom: *native Claude Code beats any harness.*
+
+<Substrate />
+
 ## Get it running
+
+Local-first: it runs on `localhost`, your data is one SQLite file, and AI features
+bill against your Claude subscription — no `ANTHROPIC_API_KEY`.
 
 ```bash
 git clone https://github.com/murnanedaniel/sciencedash

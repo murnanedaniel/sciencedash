@@ -1,0 +1,61 @@
+---
+// The 4-layer research operating system (seed.md §18), top to bottom, with a
+// downward flow and a side enforcement loop (AI review + daily check-in).
+const layers = [
+  { t: "Portfolio", s: "explore  ⇄  exploit" },
+  { t: "Project definition", s: "hypothesis · figure of merit · timeline · next steps" },
+  { t: "Fast experiments", s: "runs · metrics · Pareto fronts" },
+  { t: "Writing", s: "skeleton → AI draft → human pass → AI polish" },
+];
+const X = 168, W = 432, H = 60, GAP = 26, Y0 = 44;
+---
+
+<figure class="ros">
+  <svg viewBox="0 0 720 376" role="img"
+    aria-label="Four stacked layers — Portfolio, Project definition, Fast experiments, Writing — with idea flowing down to paper, and an AI-review and daily-check-in loop on the side that keeps projects from stalling.">
+    <defs>
+      <marker id="ros-down" viewBox="0 0 10 10" refX="5" refY="8" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0,0 L5,9 L10,0" fill="none" stroke="var(--sl-color-gray-2)" stroke-width="1.6" />
+      </marker>
+      <marker id="ros-up" viewBox="0 0 10 10" refX="5" refY="2" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0,10 L5,1 L10,10" fill="none" stroke="var(--sl-color-accent)" stroke-width="1.6" />
+      </marker>
+    </defs>
+
+    <!-- flow spine: idea → paper -->
+    <text x="132" y="34" class="cap" text-anchor="middle">idea</text>
+    <line x1="132" y1="46" x2="132" y2="330" stroke="var(--sl-color-gray-3)" stroke-width="1.4" marker-end="url(#ros-down)" />
+    <text x="132" y="352" class="cap" text-anchor="middle">paper</text>
+
+    <!-- layers -->
+    {layers.map((l, i) => (
+      <g transform={`translate(${X}, ${Y0 + i * (H + GAP)})`}>
+        <rect width={W} height={H} rx="10" fill="var(--sl-color-bg)" stroke="var(--sl-color-hairline)" stroke-width="1.2" />
+        <text x="18" y="26" class="ltitle">{l.t}</text>
+        <text x="18" y="46" class="lsub">{l.s}</text>
+      </g>
+    ))}
+
+    <!-- enforcement loop: bottom back up to top -->
+    <path d="M600,322 C 678,300 678,86 600,64" fill="none"
+      stroke="var(--sl-color-accent)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#ros-up)" />
+    <text transform="translate(700, 193) rotate(90)" class="cap accent" text-anchor="middle">AI review · daily check-in</text>
+  </svg>
+  <figcaption>Each layer feeds the next; AI critical review and the daily check-in keep projects from stalling.</figcaption>
+</figure>
+
+<style>
+  .ros { margin: 2rem 0 1.5rem; text-align: center; }
+  .ros svg { width: 100%; max-width: 680px; height: auto; }
+  .ros .ltitle { font-size: 15px; font-weight: 600; fill: var(--sl-color-text); font-family: var(--sl-font-system, ui-sans-serif, sans-serif); }
+  .ros .lsub { font-size: 12.5px; fill: var(--sl-color-gray-3); font-family: var(--sl-font-system, ui-sans-serif, sans-serif); }
+  .ros .cap { font-size: 12px; fill: var(--sl-color-gray-2); font-family: var(--sl-font-system, ui-sans-serif, sans-serif); }
+  .ros .accent { fill: var(--sl-color-accent); }
+  .ros figcaption {
+    margin-top: 0.6rem;
+    font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--sl-color-gray-2);
+    font-size: 1rem;
+  }
+</style>

@@ -1,0 +1,70 @@
+---
+// Two months of ScienceDash, from git. Bars = insertions per active day
+// (sqrt-scaled so the day-one and Workhorse spikes don't flatten the rest).
+// The long June gap is the point: a month of use with no feature commits.
+const DAYS = 63; // 23 Apr → 25 Jun
+const X0 = 56, X1 = 704, BASE = 218, MAXH = 150, K = 1.15;
+const x = (d) => X0 + (d / DAYS) * (X1 - X0);
+const h = (ins) => Math.min(MAXH, Math.sqrt(ins) * K);
+const bars = [
+  { d: 0, ins: 15461 }, { d: 1, ins: 2700 }, { d: 8, ins: 9954 },
+  { d: 11, ins: 1638 }, { d: 12, ins: 520 }, { d: 13, ins: 911 },
+  { d: 14, ins: 2300 }, { d: 15, ins: 707 }, { d: 20, ins: 26 },
+  { d: 27, ins: 1621 }, { d: 30, ins: 80 }, { d: 36, ins: 244 },
+  { d: 62, ins: 674 }, { d: 63, ins: 7698 },
+];
+const ticks = [
+  { d: 0, t: "23 Apr" }, { d: 8, t: "1 May" }, { d: 20, t: "13 May" },
+  { d: 36, t: "29 May" }, { d: 63, t: "25 Jun" },
+];
+const acts = [
+  { d: 0, t: "Built in a day" },
+  { d: 11, t: "The fleet" },
+  { d: 28, t: "Harden" },
+  { d: 49, t: "Just using it" },
+  { d: 63, t: "Open source" },
+];
+---
+
+<figure class="tl">
+  <svg viewBox="0 0 760 260" role="img"
+    aria-label="A timeline of commit activity from 23 April to 25 June: a tall day-one spike, a fleet-building burst in early May, a hardening tail, a flat month of June with no feature commits, and an open-source cap.">
+    <!-- act labels -->
+    {acts.map((a) => (
+      <text x={x(a.d)} y="30" class="act" text-anchor="middle">{a.t}</text>
+    ))}
+
+    <!-- June flatline = used, not changed -->
+    <line x1={x(37)} y1={BASE} x2={x(61)} y2={BASE} stroke="var(--sl-color-accent)" stroke-width="1.4" stroke-dasharray="3 4" />
+    <text x={x(49)} y={BASE + 34} class="flat" text-anchor="middle">used every day · 0 feature commits</text>
+
+    <!-- bars -->
+    {bars.map((b) => (
+      <rect x={x(b.d) - 3.5} y={BASE - h(b.ins)} width="7" height={h(b.ins)} rx="1.5"
+        fill="var(--sl-color-accent)" opacity={b.d >= 62 ? 0.55 : 0.85} />
+    ))}
+
+    <!-- axis -->
+    <line x1={X0} y1={BASE} x2={X1} y2={BASE} stroke="var(--sl-color-gray-3)" stroke-width="1.2" />
+    {ticks.map((tk) => (
+      <g>
+        <line x1={x(tk.d)} y1={BASE} x2={x(tk.d)} y2={BASE + 5} stroke="var(--sl-color-gray-3)" stroke-width="1.2" />
+        <text x={x(tk.d)} y={BASE + 19} class="tick" text-anchor="middle">{tk.t}</text>
+      </g>
+    ))}
+  </svg>
+  <figcaption>Five weeks of building, then a month of use. Bar height ≈ lines changed that day.</figcaption>
+</figure>
+
+<style>
+  .tl { margin: 1.5rem 0 2rem; text-align: center; }
+  .tl svg { width: 100%; max-width: 700px; height: auto; }
+  .tl .act { font-size: 12.5px; font-weight: 600; fill: var(--sl-color-text); font-family: var(--sl-font-system, ui-sans-serif, sans-serif); }
+  .tl .tick { font-size: 11px; fill: var(--sl-color-gray-3); font-family: var(--sl-font-system, ui-sans-serif, sans-serif); }
+  .tl .flat { font-size: 11.5px; font-style: italic; fill: var(--sl-color-accent); font-family: Georgia, serif; }
+  .tl figcaption {
+    margin-top: 0.4rem; font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--sl-color-gray-2); font-size: 0.95rem;
+  }
+</style>

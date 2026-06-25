@@ -1,0 +1,60 @@
+---
+// The inner loop (idea → paper, as a pipeline that loops back from a stronger
+// base) wrapped by the outer steering loop (portfolio decisions).
+const steps = ["idea", "hypothesis", "runs", "milestone", "skeleton", "AI draft", "polish", "paper"];
+const X0 = 60, STEP = 87, NW = 76, NY = 150, NH = 42;
+---
+
+<figure class="lp">
+  <svg viewBox="0 0 760 360" role="img"
+    aria-label="An outer portfolio-steering loop feeds ideas into an inner loop that runs idea, hypothesis, runs, milestone, skeleton, AI draft, polish, paper — then loops back from a stronger base.">
+    <defs>
+      <marker id="lp-r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--sl-color-gray-2)" />
+      </marker>
+      <marker id="lp-acc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--sl-color-accent)" />
+      </marker>
+    </defs>
+
+    <!-- outer steering loop -->
+    <rect x="60" y="22" width="640" height="40" rx="20" fill="none" stroke="var(--sl-color-hairline)" stroke-width="1.2" />
+    <text x="380" y="47" class="outer" text-anchor="middle">Outer loop · portfolio steering — promote · park · rebalance explore ⇄ exploit</text>
+    <line x1="98" y1="62" x2="98" y2="148" stroke="var(--sl-color-gray-3)" stroke-width="1.3" marker-end="url(#lp-r)" />
+
+    <!-- inner pipeline -->
+    {steps.map((s, i) => (
+      <g transform={`translate(${X0 + i * STEP}, ${NY})`}>
+        <rect width={NW} height={NH} rx="9" fill="var(--sl-color-bg)" stroke="var(--sl-color-hairline)" stroke-width="1.2" />
+        <text x={NW / 2} y="26" class="step" text-anchor="middle">{s}</text>
+      </g>
+    ))}
+    {steps.slice(1).map((_, i) => (
+      <line
+        x1={X0 + i * STEP + NW} y1={NY + NH / 2}
+        x2={X0 + (i + 1) * STEP - 1} y2={NY + NH / 2}
+        stroke="var(--sl-color-gray-3)" stroke-width="1.3" marker-end="url(#lp-r)" />
+    ))}
+
+    <!-- loop back from a stronger base -->
+    <path d="M707,192 C 707,256 98,256 98,192" fill="none"
+      stroke="var(--sl-color-accent)" stroke-width="1.6" marker-end="url(#lp-acc)" />
+    <text x="402" y="248" class="base" text-anchor="middle">from a stronger base</text>
+  </svg>
+  <figcaption>The inner loop turns a question into a paper; the outer loop decides which questions deserve the compute.</figcaption>
+</figure>
+
+<style>
+  .lp { margin: 2rem 0 1.5rem; text-align: center; }
+  .lp svg { width: 100%; max-width: 700px; height: auto; }
+  .lp .step { font-size: 12.5px; fill: var(--sl-color-text); font-family: var(--sl-font-system, ui-sans-serif, sans-serif); }
+  .lp .outer { font-size: 12px; fill: var(--sl-color-gray-2); font-family: var(--sl-font-system, ui-sans-serif, sans-serif); }
+  .lp .base { font-size: 12.5px; font-style: italic; fill: var(--sl-color-accent); font-family: Georgia, serif; }
+  .lp figcaption {
+    margin-top: 0.6rem;
+    font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--sl-color-gray-2);
+    font-size: 1rem;
+  }
+</style>
