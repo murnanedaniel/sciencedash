@@ -237,6 +237,7 @@ model Project {
   repoLinks           RepoLink[]
   agentMessages       AgentMessage[]
   workhorses          Workhorse[]
+  threads             Thread[]
 
   @@index([programmeId])
 }
@@ -617,4 +618,60 @@ model BrainChat {
 
   @@index([createdAt])
   @@index([summarizedAt])
+}
+
+/// A Claude Code session transcript ingested from any machine — the ambient
+/// context layer. Every `claude` session (terminal or remote-controlled, on
+/// homebox / Perlmutter / laptop) ships its JSONL here so conversations are
+/// searchable across machines and sessions. Search runs over `bodyText` via a
+/// raw FTS5 table (ThreadFTS); `turns` keep the conversation for rendering.
+model Thread {
+  id           String    @id @default(cuid())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  /// Claude Code session UUID (the .jsonl filename). Unique across machines.
+  sessionId    String    @unique
+  /// Hostname the session ran on (homebox / perlmutter / laptop).
+  machine      String
+  /// The session's working directory (from the transcript events).
+  cwd          String
+  /// Auto-generated session title (the `ai-title` event), if any.
+  title        String?
+
+  /// Project matched by cwd -> Project.localPath. Null = unassociated.
+  projectId    String?
+  project      Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  firstAt      DateTime?
+  lastAt       DateTime?
+  turnCount    Int       @default(0)
+  /// Redacted, concatenated user+assistant+tool text for full-text search.
+  bodyText     String    @default("")
+  /// Lines shipped so far — incremental ingest dedup (the shipper also tracks
+  /// this locally; stored here as the server's source of truth).
+  shippedLines Int       @default(0)
+
+  turns        Turn[]
+
+  @@index([projectId])
+  @@index([machine])
+  @@index([lastAt])
+}
+
+/// One turn (user / assistant / tool) within a Thread, for rendering the
+/// conversation. Full-text search runs over Thread.bodyText, not per-turn.
+model Turn {
+  id        String    @id @default(cuid())
+  threadId  String
+  thread    Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  idx       Int
+  role      String    // user | assistant | tool
+  text      String
+  toolName  String?
+  at        DateTime?
+
+  @@unique([threadId, idx])
+  @@index([threadId])
 }

@@ -1,0 +1,125 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { redact } from "@/lib/ingest/redact";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * POST /api/ingest/transcript — the ambient context layer's ingest endpoint.
+ * The per-machine shipper (tools/transcript-sync/ship.py) tails Claude Code
+ * session JSONLs, extracts + redacts text, and posts incremental batches here.
+ * Proxy-gated (bearer) like every /api route. Upserts a Thread by sessionId,
+ * appends Turns, associates to a Project by cwd, and FTS stays in sync via the
+ * ThreadFTS triggers (on Thread.bodyText changes).
+ *
+ * Body: { machine, sessionId, cwd, title?, events: [{role,text?,toolName?,at?}],
+ *         fromLine?, totalLines? }
+ */
+type InEvent = { role?: string; text?: string; toolName?: string | null; at?: string | null };
+type Body = {
+  machine?: string;
+  sessionId?: string;
+  cwd?: string;
+  title?: string | null;
+  events?: InEvent[];
+  fromLine?: number;
+  totalLines?: number;
+};
+
+export async function POST(req: NextRequest) {
+  let body: Body;
+  try {
+    body = (await req.json()) as Body;
+  } catch {
+    return NextResponse.json({ error: "invalid json" }, { status: 400 });
+  }
+  const machine = body.machine?.trim();
+  const sessionId = body.sessionId?.trim();
+  const cwd = body.cwd?.trim();
+  if (!machine || !sessionId || !cwd) {
+    return NextResponse.json({ error: "machine, sessionId, cwd are required" }, { status: 400 });
+  }
+  const events = Array.isArray(body.events) ? body.events : [];
+
+  const projectId = await resolveProjectId(cwd);
+
+  const result = await prisma.$transaction(async (tx) => {
+    let thread = await tx.thread.findUnique({ where: { sessionId } });
+    if (!thread) {
+      thread = await tx.thread.create({
+        data: { sessionId, machine, cwd, projectId, title: body.title ?? null },
+      });
+    }
+
+    // Dedup: the shipper resumes from thread.shippedLines; ignore re-sends of
+    // already-stored prefixes.
+    const fromLine = body.fromLine ?? thread.shippedLines;
+    if (fromLine < thread.shippedLines) {
+      return { appended: 0, skipped: true, projectId: thread.projectId };
+    }
+
+    let idx = thread.turnCount;
+    let firstAt = thread.firstAt;
+    let lastAt = thread.lastAt;
+    const turnData: {
+      threadId: string; idx: number; role: string; text: string; toolName: string | null; at: Date | null;
+    }[] = [];
+    const pieces: string[] = [];
+    for (const ev of events) {
+      const text = redact(ev.text ?? "");
+      const at = ev.at ? new Date(ev.at) : null;
+      if (at && !Number.isNaN(at.getTime())) {
+        if (!firstAt || at < firstAt) firstAt = at;
+        if (!lastAt || at > lastAt) lastAt = at;
+      }
+      turnData.push({
+        threadId: thread.id,
+        idx: idx++,
+        role: ev.role || "user",
+        text,
+        toolName: ev.toolName ?? null,
+        at: at && !Number.isNaN(at.getTime()) ? at : null,
+      });
+      if (text) pieces.push(text);
+    }
+    if (turnData.length) await tx.turn.createMany({ data: turnData });
+
+    const newBody =
+      thread.bodyText + (pieces.length ? (thread.bodyText ? "\n" : "") + pieces.join("\n") : "");
+
+    await tx.thread.update({
+      where: { id: thread.id },
+      data: {
+        title: body.title ?? thread.title,
+        machine,
+        cwd,
+        projectId: thread.projectId ?? projectId,
+        turnCount: idx,
+        bodyText: newBody,
+        shippedLines: body.totalLines ?? thread.shippedLines,
+        firstAt,
+        lastAt,
+      },
+    });
+    return { appended: turnData.length, skipped: false, projectId: thread.projectId ?? projectId };
+  });
+
+  return NextResponse.json({ ok: true, sessionId, ...result });
+}
+
+/** Map a session's cwd to a Project via Project.localPath (longest prefix wins). */
+async function resolveProjectId(cwd: string): Promise<string | null> {
+  const projects = await prisma.project.findMany({
+    where: { localPath: { not: null } },
+    select: { id: true, localPath: true },
+  });
+  let best: { id: string; len: number } | null = null;
+  for (const p of projects) {
+    const lp = p.localPath as string;
+    const prefix = lp.endsWith("/") ? lp : lp + "/";
+    if (cwd === lp || cwd.startsWith(prefix)) {
+      if (!best || lp.length > best.len) best = { id: p.id, len: lp.length };
+    }
+  }
+  return best?.id ?? null;
+}
