@@ -13,6 +13,7 @@ import {
 import { toggleAiAutoReview } from "@/lib/server/projectActions";
 import { detectClaudeCode } from "@/lib/ai/client";
 import { autoDeployEnabled } from "@/lib/config";
+import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
 import { PromptKind } from "@/generated/prisma/client";
 
 const PROMPT_LABELS: Record<PromptKind, string> = {
@@ -44,6 +45,11 @@ export default async function SettingsPage() {
 
   const templates = await prisma.promptTemplate.findMany();
   const templatesByKind = new Map(templates.map((t) => [t.kind, t]));
+
+  // Ambient-context one-liner — token + public URL filled in, copy-paste ready.
+  const dashboardOrigin = await resolveDashboardOrigin();
+  const ambientToken = process.env.SCIENCEDASH_AUTH_TOKEN ?? "";
+  const ambientCmd = `bash <(curl -fsSL -H "Authorization: Bearer ${ambientToken}" "${dashboardOrigin}/api/ambient-bootstrap/launch")`;
 
   const defaultPrompts: Record<PromptKind, string> = {
     critical_review: await loadDefaultPrompt("critical_review"),
@@ -161,6 +167,29 @@ export default async function SettingsPage() {
       </header>
 
       <div className="stack">
+        {/* Ambient context — set up a new machine in one command */}
+        <div className="card">
+          <h2 className="sectionTitle">Ambient context — add a machine</h2>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Run this on any machine (laptop, Perlmutter, …) to ingest its Claude
+            Code conversations into ScienceDash, get project context injected into
+            every session, and the <code>sciencedash</code> skill. One command —
+            no clone, no scp. The homebox is already set up.
+          </p>
+          {ambientToken ? (
+            <ClusterCmd cmd={ambientCmd} />
+          ) : (
+            <p className="muted small">
+              <code>SCIENCEDASH_AUTH_TOKEN</code> isn&apos;t set in the dashboard&apos;s
+              environment — set it to enable the bootstrap.
+            </p>
+          )}
+          <p className="muted small" style={{ marginTop: 8 }}>
+            Disable later: remove the <code>SessionStart</code> entry from{" "}
+            <code>~/.claude/settings.json</code>, or <code>crontab -e</code> to stop shipping.
+          </p>
+        </div>
+
         {autoDeployEnabled() && <DeployStatusWidget />}
 
         {/* Integrations */}
