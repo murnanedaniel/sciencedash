@@ -636,6 +636,9 @@ model Thread {
   machine      String
   /// The session's working directory (from the transcript events).
   cwd          String
+  /// Normalized git remote of cwd (host/org/repo) — the robust, cross-machine
+  /// project key (a repo has the same remote on every machine).
+  gitRemote    String?
   /// Auto-generated session title (the `ai-title` event), if any.
   title        String?
 

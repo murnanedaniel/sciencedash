@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { redact } from "@/lib/ingest/redact";
+import { resolveProject } from "@/lib/ingest/projectMatch";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ type Body = {
   machine?: string;
   sessionId?: string;
   cwd?: string;
+  gitRemote?: string | null;
   title?: string | null;
   events?: InEvent[];
   fromLine?: number;
@@ -40,14 +42,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "machine, sessionId, cwd are required" }, { status: 400 });
   }
   const events = Array.isArray(body.events) ? body.events : [];
+  const gitRemote = body.gitRemote?.trim() || null;
 
-  const projectId = await resolveProjectId(cwd);
+  const resolved = await resolveProject({ cwd, gitRemote });
 
   const result = await prisma.$transaction(async (tx) => {
     let thread = await tx.thread.findUnique({ where: { sessionId } });
     if (!thread) {
       thread = await tx.thread.create({
-        data: { sessionId, machine, cwd, projectId, title: body.title ?? null },
+        data: {
+          sessionId,
+          machine,
+          cwd,
+          gitRemote,
+          projectId: resolved.projectId,
+          title: body.title ?? null,
+        },
       });
     }
 
@@ -93,7 +103,8 @@ export async function POST(req: NextRequest) {
         title: body.title ?? thread.title,
         machine,
         cwd,
-        projectId: thread.projectId ?? projectId,
+        gitRemote: thread.gitRemote ?? gitRemote,
+        projectId: thread.projectId ?? resolved.projectId,
         turnCount: idx,
         bodyText: newBody,
         shippedLines: body.totalLines ?? thread.shippedLines,
@@ -101,25 +112,8 @@ export async function POST(req: NextRequest) {
         lastAt,
       },
     });
-    return { appended: turnData.length, skipped: false, projectId: thread.projectId ?? projectId };
+    return { appended: turnData.length, skipped: false, projectId: thread.projectId ?? resolved.projectId };
   });
 
   return NextResponse.json({ ok: true, sessionId, ...result });
-}
-
-/** Map a session's cwd to a Project via Project.localPath (longest prefix wins). */
-async function resolveProjectId(cwd: string): Promise<string | null> {
-  const projects = await prisma.project.findMany({
-    where: { localPath: { not: null } },
-    select: { id: true, localPath: true },
-  });
-  let best: { id: string; len: number } | null = null;
-  for (const p of projects) {
-    const lp = p.localPath as string;
-    const prefix = lp.endsWith("/") ? lp : lp + "/";
-    if (cwd === lp || cwd.startsWith(prefix)) {
-      if (!best || lp.length > best.len) best = { id: p.id, len: lp.length };
-    }
-  }
-  return best?.id ?? null;
 }

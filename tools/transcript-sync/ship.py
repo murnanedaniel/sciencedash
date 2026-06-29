@@ -51,6 +51,19 @@ _ENV_ASSIGN = re.compile(
 )
 
 
+def git_remote(cwd):
+    """Best-effort origin remote URL of cwd — the robust cross-machine project key."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "-C", cwd, "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
 def redact(s):
     if not s:
         return s
@@ -221,6 +234,7 @@ def main():
                 try:
                     post(url, token, {
                         "machine": host, "sessionId": session_id, "cwd": cwd,
+                        "gitRemote": git_remote(cwd),
                         "title": title, "events": events,
                         "fromLine": last, "totalLines": total,
                     })

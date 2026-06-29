@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { setThreadProject } from "@/lib/server/threadActions";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +11,20 @@ export default async function ThreadPage({
   params: Promise<{ sessionId: string }>;
 }) {
   const { sessionId } = await params;
-  const thread = await prisma.thread.findUnique({
-    where: { sessionId },
-    include: {
-      project: { select: { id: true, title: true } },
-      turns: { orderBy: { idx: "asc" } },
-    },
-  });
+  const [thread, projects] = await Promise.all([
+    prisma.thread.findUnique({
+      where: { sessionId },
+      include: {
+        project: { select: { id: true, title: true } },
+        turns: { orderBy: { idx: "asc" } },
+      },
+    }),
+    prisma.project.findMany({
+      select: { id: true, title: true },
+      orderBy: { updatedAt: "desc" },
+      take: 200,
+    }),
+  ]);
   if (!thread) notFound();
 
   return (
@@ -40,6 +48,36 @@ export default async function ThreadPage({
             <code style={{ fontFamily: "var(--font-geist-mono)" }}>{thread.cwd}</code>
           </span>
         </div>
+        <form
+          action={setThreadProject}
+          className="rowWrap"
+          style={{ gap: 8, marginTop: 10, alignItems: "center" }}
+        >
+          <input type="hidden" name="sessionId" value={thread.sessionId} />
+          <label className="muted small">Belongs to project:</label>
+          <select
+            name="projectId"
+            defaultValue={thread.projectId ?? ""}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 10,
+              border: "1px solid var(--border2, #ccc)",
+              background: "color-mix(in oklab, var(--paper, #fff) 90%, transparent)",
+              color: "var(--ink)",
+              maxWidth: 360,
+            }}
+          >
+            <option value="">— unassigned —</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title}
+              </option>
+            ))}
+          </select>
+          <button type="submit" className="button buttonSecondary" style={{ padding: "6px 12px" }}>
+            Save
+          </button>
+        </form>
       </header>
 
       <div className="stack">

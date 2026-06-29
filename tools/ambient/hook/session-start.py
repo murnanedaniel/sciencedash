@@ -36,6 +36,19 @@ def emit(context):
     sys.exit(0)
 
 
+def git_remote(cwd):
+    """Best-effort origin remote URL of cwd (the robust cross-machine key)."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "-C", cwd, "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return out.stdout.strip() or None
+    except Exception:
+        return None
+
+
 def discover():
     url = os.environ.get("SCIENCEDASH_URL", "")
     if not url and (SD / "config.json").exists():
@@ -73,7 +86,11 @@ def main():
     try:
         from urllib.parse import quote
         url, token = discover()
-        req = urllib.request.Request(url + "/api/context/slim?cwd=" + quote(cwd))
+        qs = "cwd=" + quote(cwd)
+        rem = git_remote(cwd)
+        if rem:
+            qs += "&gitRemote=" + quote(rem)
+        req = urllib.request.Request(url + "/api/context/slim?" + qs)
         if token:
             req.add_header("authorization", f"Bearer {token}")
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
