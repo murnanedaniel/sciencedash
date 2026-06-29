@@ -9,10 +9,11 @@ export const dynamic = "force-dynamic";
 /**
  * Brain chat page — the daily one-liner pulls a self-contained bash
  * launcher from /api/brain-chat/launch and pipes it into bash. The
- * launcher writes ~/.sciencedash/brain-chat/{.mcp.json, CHAT_CONTEXT.md}
- * with a fresh context snapshot and drops the user into a tmux + claude
- * session. Token is mirrored from the curl Authorization header into
- * the .mcp.json so the chat Claude can talk to /api/mcp.
+ * launcher writes ~/.sciencedash/brain-chat/CHAT_CONTEXT.md with a fresh
+ * context snapshot and drops the user into a tmux + claude session.
+ * Token is exported (from the curl Authorization header) into the
+ * session env so the installed `sciencedash` skill can reach the REST
+ * tool gateway.
  *
  * Below the bootstrap, recent persisted BrainChat sessions are listed
  * with collapsible transcripts.

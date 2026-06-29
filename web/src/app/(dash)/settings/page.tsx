@@ -276,11 +276,11 @@ export default async function SettingsPage() {
               <ClusterCmd cmd="DASHBOARD=https://<your-cloudflared-url> HOST=<host> bash ~/.sciencedash-bootstrap/setup.sh" />
             </li>
             <li>
-              Edit <code>~/.sciencedash/config.json</code> to register projects (set <code>dashboard_url</code> to the same cloudflared URL), then re-run setup.sh (it&apos;s idempotent and generates per-project MCP configs).
+              Edit <code>~/.sciencedash/config.json</code> to register projects (set <code>dashboard_url</code> to the same cloudflared URL), then re-run setup.sh (it&apos;s idempotent and writes each project&apos;s <code>CHAT_CONTEXT.md</code> primer).
             </li>
             <li>
-              <div>Start the Claude session inside tmux:</div>
-              <ClusterCmd cmd="tmux new -As sd-<projectId> &quot;cd <repo> && claude --mcp-config ~/.sciencedash/<projectId>/mcp-config.json&quot;" />
+              <div>Start the Claude session inside tmux (tools reach ScienceDash through the installed <code>sciencedash</code> skill):</div>
+              <ClusterCmd cmd="tmux new -As sd-<projectId> &quot;cd <repo> && claude --append-system-prompt \&quot;$(cat ~/.sciencedash/<projectId>/CHAT_CONTEXT.md)\&quot;&quot;" />
             </li>
             <li>
               <div>Re-attach later (optional):</div>

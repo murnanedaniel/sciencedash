@@ -31,6 +31,10 @@ normally don't need to configure anything.
   project's brief (status, hypothesis, figure of merit, next steps, metrics).
 - **"Record / log this decision"** →
   `sd.py log-decision <projectId> "<one-line rationale>"`.
+- **Any other ScienceDash write/read** (create a check-in, post a message,
+  update an entity, dispatch a workhorse, …) → `sd.py call <tool> '<json-args>'`.
+  This reaches the full surface of ~24 tools by name (the same set the
+  dashboard's own agents use). Examples below.
 
 ## Commands
 
@@ -39,6 +43,12 @@ python3 ~/.claude/skills/sciencedash/sd.py search "perlmutter sync resilience"
 python3 ~/.claude/skills/sciencedash/sd.py projects
 python3 ~/.claude/skills/sciencedash/sd.py context <projectId>
 python3 ~/.claude/skills/sciencedash/sd.py log-decision <projectId> "chose FTS5 over LIKE for transcript search"
+
+# Full tool surface via `call <tool> '<json-args>'`:
+python3 ~/.claude/skills/sciencedash/sd.py call query_entity '{"kind":"project","status":"active"}'
+python3 ~/.claude/skills/sciencedash/sd.py call get_entity '{"kind":"project","id":"<projectId>"}'
+python3 ~/.claude/skills/sciencedash/sd.py call create_check_in '{"projectId":"<id>","body":"<markdown>","kind":"routine"}'
+python3 ~/.claude/skills/sciencedash/sd.py call post_message '{"projectId":"<id>","body":"<one-liner>","severity":"info"}'
 ```
 
 ## Notes

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildBrainChatContext } from "@/lib/brain/chat-context";
-import { buildMcpServerConfig } from "@/lib/brain/mcp-client";
 import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
 import { BRAIN_CHAT_SKILLS } from "@/lib/brain/skills";
 
@@ -16,10 +15,11 @@ export const dynamic = "force-dynamic";
  *   curl -fsSL -H "Authorization: Bearer <TOKEN>" \
  *     https://your-dashboard-host.example.com/api/brain-chat/launch | bash
  *
- * The Bearer token from the curl request is mirrored back into the
- * `.mcp.json` the script writes — the chat Claude calls /api/mcp using
- * the same token, so the proxy lets it through. Token never leaves the
- * user's shell environment / the dashboard's server-side render.
+ * The Bearer token from the curl request is exported into the session's
+ * environment (SCIENCEDASH_AUTH_TOKEN/SCIENCEDASH_URL) so the installed
+ * `sciencedash` skill can reach the dashboard's REST tool gateway. Token
+ * never leaves the user's shell environment / the dashboard's
+ * server-side render.
  *
  * Auth: gated by the proxy (Bearer required for non-HTML requests).
  */
@@ -44,19 +44,13 @@ export async function GET(req: NextRequest) {
     buildBrainChatContext(),
   ]);
 
-  const mcpConfig = JSON.stringify(
-    {
-      mcpServers: {
-        sciencedash: buildMcpServerConfig({ dashboardUrl, token }),
-      },
-    },
-    null,
-    2,
-  );
+  // Single-quoted shell literal: wrap value in '…' and escape any embedded
+  // single quote as '\'' so tokens/URLs survive verbatim with no expansion.
+  const shq = (v: string) => `'${v.replace(/'/g, "'\\''")}'`;
 
-  // Single-quoted heredoc terminators ('SDMCP_EOF', 'SDCTX_EOF',
-  // 'SDSKILL_EOF') prevent shell expansion inside the file bodies —
-  // token characters, $, and backticks are all safe.
+  // Single-quoted heredoc terminators ('SDCTX_EOF', 'SDSKILL_EOF') prevent
+  // shell expansion inside the file bodies — token characters, $, and
+  // backticks are all safe.
   const skillBlocks: string[] = [];
   for (const skill of BRAIN_CHAT_SKILLS) {
     skillBlocks.push(
@@ -74,10 +68,10 @@ export async function GET(req: NextRequest) {
     "WORKSPACE=\"$HOME/.sciencedash/brain-chat\"",
     "mkdir -p \"$WORKSPACE\"",
     "",
-    "cat > \"$WORKSPACE/.mcp.json\" <<'SDMCP_EOF'",
-    mcpConfig,
-    "SDMCP_EOF",
-    "chmod 600 \"$WORKSPACE/.mcp.json\"",
+    "# Tools reach ScienceDash through the installed `sciencedash` skill,",
+    "# which reads these from the environment (REST tool gateway, bearer).",
+    `export SCIENCEDASH_URL=${shq(dashboardUrl)}`,
+    `export SCIENCEDASH_AUTH_TOKEN=${shq(token)}`,
     "",
     "cat > \"$WORKSPACE/CHAT_CONTEXT.md\" <<'SDCTX_EOF'",
     primer,
@@ -96,7 +90,7 @@ export async function GET(req: NextRequest) {
     "  exit 1",
     "fi",
     "",
-    "exec tmux new -As sd-brain 'claude --continue --mcp-config .mcp.json --append-system-prompt \"$(cat CHAT_CONTEXT.md)\" 2>/dev/null || claude --mcp-config .mcp.json --append-system-prompt \"$(cat CHAT_CONTEXT.md)\"'",
+    "exec tmux new -As sd-brain 'claude --continue --append-system-prompt \"$(cat CHAT_CONTEXT.md)\" 2>/dev/null || claude --append-system-prompt \"$(cat CHAT_CONTEXT.md)\"'",
     "",
   ].join("\n");
 

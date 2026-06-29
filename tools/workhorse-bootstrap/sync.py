@@ -269,10 +269,11 @@ def execute_directive(
 
 
 _DEFAULT_TICK_PROMPT = (
-    "Tick. Read this project's `nextSteps` via "
-    "`mcp__sciencedash__get_project`. Pick exactly one concrete action and "
-    "take it. If `nextSteps` is empty or stale, `create_check_in(kind=\"plan\")` "
-    "proposing the next 3 steps. Be terse."
+    "Tick. Read this project's `nextSteps` via the sciencedash skill "
+    "(`sd.py call get_entity '{\"kind\":\"project\",\"id\":\"<projectId>\"}'`). "
+    "Pick exactly one concrete action and take it. If `nextSteps` is empty "
+    "or stale, post a `create_check_in` with kind=\"plan\" proposing the next "
+    "3 steps. Be terse."
 )
 
 
@@ -338,29 +339,40 @@ def _revive_session(
     project_id: str,
     root: Path,
 ) -> dict[str, Any]:
-    """Respawn a Claude tmux session for a project, fully wired:
-    --mcp-config + --append-system-prompt CHAT_CONTEXT.md, falling back
-    to a fresh session when --continue has no prior session.
+    """Respawn a Claude tmux session for a project, falling back to a
+    fresh session when --continue has no prior session.
 
-    The previous version of this helper started Claude with no MCP
-    config, so the revived session couldn't actually call ScienceDash
-    tools — defeating the whole point of Revive. Now matches the
-    dashboard's "Copy start" command shape.
+    The revived Claude reaches ScienceDash through the installed
+    `sciencedash` skill — SCIENCEDASH_URL / SCIENCEDASH_AUTH_TOKEN are
+    exported into the session (read from this host's config.json +
+    auth.env under `root`), and the per-project CHAT_CONTEXT.md primer
+    is appended as a system prompt.
     """
     if not shutil.which("tmux"):
         return {"ok": False, "error": "tmux not on PATH"}
     if not shutil.which("claude"):
         return {"ok": False, "error": "claude CLI not on PATH"}
 
-    # Per-session protocol file under <projectId>/<sessionName>/.
     # CHAT_CONTEXT.md stays at <projectId>/ — it's project-shared truth.
-    mcp_path = root / project_id / session_name / "mcp-config.json"
     ctx_path = root / project_id / "CHAT_CONTEXT.md"
-    if not mcp_path.exists():
-        return {
-            "ok": False,
-            "error": f"mcp-config not found at {mcp_path} — re-run setup.sh on this host",
-        }
+
+    # Skill auth: dashboard_url from config.json, token from auth.env.
+    try:
+        dashboard_url = json.loads((root / "config.json").read_text()).get(
+            "dashboard_url", ""
+        )
+    except (OSError, json.JSONDecodeError):
+        dashboard_url = ""
+    auth_token = (
+        _load_auth_headers(root)
+        .get("Authorization", "")
+        .removeprefix("Bearer ")
+        .strip()
+    )
+    env_prefix = (
+        f"SCIENCEDASH_URL={shlex.quote(dashboard_url.rstrip('/'))} "
+        f"SCIENCEDASH_AUTH_TOKEN={shlex.quote(auth_token)} "
+    )
 
     # Inner shell command. Note: tmux runs this through the user's
     # default shell, so $(cat …) substitution happens at session start.
@@ -368,12 +380,12 @@ def _revive_session(
     # /settings kill switch is the recovery handle, not interactive
     # prompts.
     inner = (
-        f"cd {shlex.quote(cwd)} && ("
-        f"claude --continue --mcp-config {shlex.quote(str(mcp_path))} "
+        f"cd {shlex.quote(cwd)} && {env_prefix}("
+        f"claude --continue "
         f"--dangerously-skip-permissions "
         f'--append-system-prompt "$(cat {shlex.quote(str(ctx_path))} 2>/dev/null)" '
         f"2>/dev/null || "
-        f"claude --mcp-config {shlex.quote(str(mcp_path))} "
+        f"claude "
         f"--dangerously-skip-permissions "
         f'--append-system-prompt "$(cat {shlex.quote(str(ctx_path))} 2>/dev/null)"'
         f")"
@@ -477,8 +489,8 @@ DB — runs, hypotheses, decisions, literature notes, agent messages.
 ## Default behaviour
 
 When the user asks about **the project's state, hypotheses, runs,
-decisions, recent literature, brain output, or workhorses**, use the
-`mcp__sciencedash__*` tools — these read the live DB. Do NOT infer
+decisions, recent literature, brain output, or workhorses**, reach the
+live DB through the **`sciencedash` skill** (`sd.py`). Do NOT infer
 project state from git history, file contents, or directory structure
 unless explicitly asked about the codebase.
 
@@ -489,11 +501,11 @@ Write / Edit / Glob / Grep as you normally would.
 
 `{project_id}`
 
-Examples:
-- `mcp__sciencedash__get_entity(kind="project", id="{project_id}")`
-- `mcp__sciencedash__query_entity(kind="run", filters={{"projectId": "{project_id}"}})`
-- `mcp__sciencedash__post_message(projectId="{project_id}", body=…, severity=…)`
-- `mcp__sciencedash__create_check_in(projectId="{project_id}", body=…)`
+Examples (the skill's `call` verb reaches any of the ~24 tools):
+- `sd.py call get_entity '{{"kind":"project","id":"{project_id}"}}'`
+- `sd.py call query_entity '{{"kind":"run","filters":{{"projectId":"{project_id}"}}}}'`
+- `sd.py call post_message '{{"projectId":"{project_id}","body":"…","severity":"…"}}'`
+- `sd.py call create_check_in '{{"projectId":"{project_id}","body":"…"}}'`
 
 ## Voice contract
 
@@ -516,14 +528,14 @@ def _start_session(
 
     End-to-end on one host:
       1. mkdir project_dir + session_dir under `root`.
-      2. Write mcp-config.json (replicates setup.sh's per-session block)
-         so the spawned Claude session can call ScienceDash MCP tools.
-      3. Write CHAT_CONTEXT.md if missing.
-      4. Merge the project into config.json so subsequent ticks beat
+      2. Write CHAT_CONTEXT.md if missing.
+      3. Merge the project into config.json so subsequent ticks beat
          for it via /api/mcp/sync.
-      5. tmux new-session -d running `claude --mcp-config <...>
-         --append-system-prompt "$(cat CHAT_CONTEXT.md)"` in the repo.
-      6. If an initial prompt was provided, send-keys it after a short
+      4. tmux new-session -d running `claude --append-system-prompt
+         "$(cat CHAT_CONTEXT.md)"` in the repo, with SCIENCEDASH_URL /
+         SCIENCEDASH_AUTH_TOKEN exported so the installed `sciencedash`
+         skill can reach the dashboard's REST tool gateway.
+      5. If an initial prompt was provided, send-keys it after a short
          delay so the freshly-started Claude REPL has rendered.
 
     Idempotent: re-spawning kills any existing session with the same
@@ -555,28 +567,6 @@ def _start_session(
     project_dir = root / project_id
     session_dir = project_dir / session_name
     session_dir.mkdir(parents=True, exist_ok=True)
-
-    # mcp-config.json — per-session, baked with the bearer token from
-    # auth.env (passed in as auth_headers by the caller). 0o600 perms.
-    mcp_path = session_dir / "mcp-config.json"
-    headers = {"X-Workhorse-Id": f"{host}:{session_name}"}
-    headers.update(auth_headers)
-    mcp_path.write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "sciencedash": {
-                        "type": "http",
-                        "url": f"{dashboard_url.rstrip('/')}/api/mcp",
-                        "headers": headers,
-                    }
-                }
-            },
-            indent=2,
-        )
-        + "\n"
-    )
-    mcp_path.chmod(0o600)
 
     ctx_path = project_dir / "CHAT_CONTEXT.md"
     if not ctx_path.exists():
@@ -615,13 +605,23 @@ def _start_session(
         capture_output=True,
     )
 
+    # The spawned Claude reaches ScienceDash through the installed
+    # `sciencedash` skill, which reads these from the environment (REST
+    # tool gateway, bearer). Exporting here keeps the session self-contained
+    # even if this host's global ~/.sciencedash config differs from `root`.
+    auth_token = auth_headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    env_prefix = (
+        f"SCIENCEDASH_URL={shlex.quote(dashboard_url.rstrip('/'))} "
+        f"SCIENCEDASH_AUTH_TOKEN={shlex.quote(auth_token)} "
+    )
+
     # --dangerously-skip-permissions: workhorses run unattended in tmux;
     # the kill switch on /settings is the recovery handle, not interactive
     # permission prompts. Without this, the session stalls on the first
-    # MCP / Bash / Edit call waiting for a "1/Yes" that never comes.
+    # skill / Bash / Edit call waiting for a "1/Yes" that never comes.
     inner = (
-        f"cd {shlex.quote(repo_path)} && "
-        f"claude --mcp-config {shlex.quote(str(mcp_path))} "
+        f"cd {shlex.quote(repo_path)} && {env_prefix}"
+        f"claude "
         f"--dangerously-skip-permissions "
         f'--append-system-prompt "$(cat {shlex.quote(str(ctx_path))} 2>/dev/null)"'
     )
@@ -1007,7 +1007,7 @@ def _post_workhorse_alert(
     the workhorse host. Best-effort: a failed POST here just logs and
     moves on — we never want a notification error to crash the sync loop.
     """
-    url = dashboard_url.rstrip("/") + "/api/mcp"
+    url = dashboard_url.rstrip("/") + "/api/tool/post_message"
     body_md = (
         f"**Workhorse dispatch failed on `{host}`.**\n\n"
         f"- Session: `{session_name}`\n"
@@ -1016,23 +1016,15 @@ def _post_workhorse_alert(
         f"The `start_session` directive was consumed but couldn't launch. "
         f"Re-dispatch with a corrected payload to retry."
     )
-    rpc_body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {
-            "name": "post_message",
-            "arguments": {
-                "projectId": project_id,
-                "body": body_md,
-                "kind": "alert",
-                "severity": "blocker",
-                "source": f"workhorse@{host}:{session_name}",
-            },
-        },
+    args = {
+        "projectId": project_id,
+        "body": body_md,
+        "kind": "alert",
+        "severity": "blocker",
+        "source": f"workhorse@{host}:{session_name}",
     }
     try:
-        post_json(url, rpc_body, extra_headers=auth_headers, timeout=15.0)
+        post_json(url, args, extra_headers=auth_headers, timeout=15.0)
     except RuntimeError as e:
         _log(log_path, f"[host-sync] failed to post failure alert: {e}")
 

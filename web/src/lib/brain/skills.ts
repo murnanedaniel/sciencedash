@@ -2,7 +2,8 @@
  * Skill markdown shipped to the brain-chat workspace by the launcher.
  *
  * Each skill is a reusable recipe the chat brain can invoke when the user
- * asks for that kind of work — the brain calls MCP tools in a known-good
+ * asks for that kind of work — the brain calls ScienceDash tools (via the
+ * `sciencedash` skill, `sd.py call <name> '<json>'`) in a known-good
  * sequence rather than rediscovering the shape every session.
  *
  * The launcher writes each skill to
@@ -31,13 +32,15 @@ You are producing a tight, decision-shaped weekly digest of ScienceDash activity
 
 ## Steps
 
+Tools are invoked through the \`sciencedash\` skill: \`sd.py call <name> '<json-args>'\`.
+
 1. Compute "since" as the ISO-8601 timestamp from 7 days ago (e.g. with the user's clock).
 2. Pull the inputs in parallel:
-   - \`mcp__sciencedash__query_entity(kind="job", since=<7d>)\` — every AI run (kind: project_brain, github_pull, ai_review, etc.). Note total cost (sum costUsd) and any failures.
-   - \`mcp__sciencedash__query_entity(kind="message", since=<7d>)\` — agent traffic across projects. Note severity=blocker / decision counts.
-   - \`mcp__sciencedash__query_entity(kind="decision", since=<7d>)\` — explicit decisions logged across projects (use a per-project pass if needed).
-   - \`mcp__sciencedash__query_entity(kind="project", status="active")\` — list of active projects to scope per-project sub-queries.
-3. For each active project, briefly check: any new check-ins, runs, or significant state changes? Fetch via \`query_entity(kind="check_in" | "run", projectId=..., since=<7d>)\`.
+   - \`sd.py call query_entity '{"kind":"job","since":"<7d>"}'\` — every AI run (kind: project_brain, github_pull, ai_review, etc.). Note total cost (sum costUsd) and any failures.
+   - \`sd.py call query_entity '{"kind":"message","since":"<7d>"}'\` — agent traffic across projects. Note severity=blocker / decision counts.
+   - \`sd.py call query_entity '{"kind":"decision","since":"<7d>"}'\` — explicit decisions logged across projects (use a per-project pass if needed).
+   - \`sd.py call query_entity '{"kind":"project","status":"active"}'\` — list of active projects to scope per-project sub-queries.
+3. For each active project, briefly check: any new check-ins, runs, or significant state changes? Fetch via \`sd.py call query_entity '{"kind":"check_in","projectId":"...","since":"<7d>"}'\` (and \`kind="run"\`).
 4. Synthesise a markdown digest with these sections:
    - **AI activity**: total jobs, total cost, # failures (link to /jobs if any).
    - **Cross-project signals**: any blocker-severity messages worth surfacing, decisions made.
@@ -46,7 +49,7 @@ You are producing a tight, decision-shaped weekly digest of ScienceDash activity
 
 ## Output
 
-Show the digest to the user. Then ask whether to post it as a global agent message (no projectId) or pin it to a specific project. If they say yes, call \`mcp__sciencedash__post_message(projectId=..., body=<digest>, kind="digest", source="brain-chat")\`.
+Show the digest to the user. Then ask whether to post it as a global agent message (no projectId) or pin it to a specific project. If they say yes, call \`sd.py call post_message '{"projectId":"...","body":"<digest>","kind":"digest","source":"brain-chat"}'\`.
 
 Keep the whole digest under ~400 words. If something is too detailed for that, link to the relevant project page instead of inlining.
 `;
@@ -62,11 +65,13 @@ You are clearing the user's unread agent message backlog. Goal: every unread ite
 
 ## Steps
 
-1. Fetch unread messages (cross-project): \`mcp__sciencedash__query_entity(kind="message", unreadOnly=true, limit=50)\`.
+Tools are invoked through the \`sciencedash\` skill: \`sd.py call <name> '<json-args>'\`.
+
+1. Fetch unread messages (cross-project): \`sd.py call query_entity '{"kind":"message","unreadOnly":true,"limit":50}'\`.
 2. Group them by project + severity. Show the user the count summary upfront ("12 unread: 1 blocker, 3 decision, 5 suggestion, 3 info").
 3. Walk through them severity-first (blocker → decision → suggestion → info). For each:
    - Read the body. Decide: **act**, **defer**, or **dismiss**.
-   - **Act**: take the action via the appropriate MCP tool (e.g. \`set_project_blocker\`, \`update_entity\`, \`dispatch_workhorse\`, \`record_decision\`), then \`mark_message_read(id)\`.
+   - **Act**: take the action via the appropriate tool (e.g. \`set_project_blocker\`, \`update_entity\`, \`dispatch_workhorse\`, \`record_decision\`), then \`mark_message_read\`.
    - **Defer**: post a short check-in summarising what needs to happen and when (\`create_check_in\`), then mark read.
    - **Dismiss**: mark read with no follow-up. Reserve for items that are stale or already-addressed elsewhere.
 4. Surface items that need a real human decision instead of triaging blindly. If unsure, ask the user — don't guess on blocker-severity items.
@@ -88,6 +93,8 @@ description: Use when the user asks "any issues?", "what's broken across my proj
 # Project health check
 
 You are scanning the active project portfolio for anything that needs attention. Output is a short list of red flags, each with a one-line "what to do about it".
+
+Tools are invoked through the \`sciencedash\` skill: \`sd.py call <name> '<json-args>'\` — the \`name(args)\` notation below is shorthand for which tool + args.
 
 ## Checks
 

@@ -116,9 +116,11 @@ else
   exit 1
 fi
 
-# Generate per-project mcp-config.json files for `claude --mcp-config <file>`.
-# Each project's config sets X-Workhorse-Id so the dashboard can update
-# lastClaudeBeat from any direct MCP tool call (heartbeat-by-tool-call).
+# Write per-project CHAT_CONTEXT.md primers. Tools reach ScienceDash
+# through the installed `sciencedash` skill (no per-session mcp-config.json
+# anymore — the MCP transport is retired). The skill reads its URL/token
+# from SCIENCEDASH_URL / SCIENCEDASH_AUTH_TOKEN, which sync.py exports into
+# each spawned Claude session.
 if command -v python3 >/dev/null 2>&1; then
   # Quoted delimiter ('PY') so bash doesn't expand $vars or backticks
   # inside the Python script — the heredoc content includes markdown
@@ -132,77 +134,24 @@ cfg_path = root / "config.json"
 if not cfg_path.exists():
     sys.exit(0)
 cfg = json.loads(cfg_path.read_text())
-host = cfg.get("host", "unknown-host")
-dashboard = cfg.get("dashboard_url", "http://localhost:3000").rstrip("/")
-
-# Read SCIENCEDASH_AUTH_TOKEN from auth.env and bake it into each
-# session's mcp-config.json so Claude's MCP tool calls authenticate
-# at the dashboard's app-level proxy. Format: shell-style KEY=VALUE
-# lines (same file sync.py reads).
-#
-# Replaces the old cf-access.env path. Cloudflare Access is no longer
-# used; the dashboard self-authenticates via this Bearer token.
-auth_headers = {}
-auth_env = root / "auth.env"
-if auth_env.exists():
-    for line in auth_env.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        if k.strip() == "SCIENCEDASH_AUTH_TOKEN":
-            token = v.strip().strip('"').strip("'")
-            if token:
-                auth_headers["Authorization"] = f"Bearer {token}"
-            break
 
 for p in cfg.get("projects", []):
     pid = p.get("projectId")
     if not pid:
         continue
-    session = p.get("sessionName") or f"sd-{pid}"
     proj_dir = root / pid
     proj_dir.mkdir(parents=True, exist_ok=True)
 
-    # Per-session protocol files under <projectId>/<sessionName>/.
-    # Multiple sessions can coexist for the same project on the same
-    # host (e.g. sd-cmockitu-data + sd-cmockitu-models).
-    session_dir = proj_dir / session
-    session_dir.mkdir(parents=True, exist_ok=True)
-
-    # mcp-config.json — used with `claude --mcp-config <file>`. The
-    # X-Workhorse-Id header makes each session's MCP calls identify
-    # themselves, so claudeBeat updates the right Workhorse row.
-    # Authorization: Bearer <token> authenticates at the dashboard's
-    # app-level proxy.
-    mcp_path = session_dir / "mcp-config.json"
-    headers = {"X-Workhorse-Id": f"{host}:{session}"}
-    headers.update(auth_headers)
-    mcp_path.write_text(json.dumps({
-        "mcpServers": {
-            "sciencedash": {
-                "type": "http",
-                "url": f"{dashboard}/api/mcp",
-                "headers": headers,
-            }
-        }
-    }, indent=2) + "\n")
-    # mcp-config.json contains the bearer token; tighten perms so other
-    # users on this host can't read it.
-    mcp_path.chmod(0o600)
-    print(f"==> wrote {mcp_path}")
-
-    # Warn (don't auto-delete) when legacy flat-layout files exist
-    # alongside the new per-session subdir — they're harmless but
-    # confusing if left lying around.
+    # Warn (don't auto-delete) when legacy mcp-config.json / flat-layout
+    # files exist — the MCP transport is retired, so these are dead.
     for legacy_name in ("mcp-config.json", "outbox.jsonl", "inbox.jsonl"):
-        legacy = proj_dir / legacy_name
-        if legacy.exists():
-            print(f"!! legacy file {legacy} predates per-session layout — safe to delete")
+        for legacy in (proj_dir / legacy_name, *proj_dir.glob(f"*/{legacy_name}")):
+            if legacy.exists():
+                print(f"!! legacy file {legacy} predates the skill — safe to delete")
 
-    # CHAT_CONTEXT.md — pass via `--append-system-prompt "$(cat …)"` so
-    # Claude knows to use mcp__sciencedash__* tools instead of inferring
-    # "this project" from the cwd's git history.
+    # CHAT_CONTEXT.md — passed via `--append-system-prompt "$(cat …)"` so
+    # Claude reaches state through the `sciencedash` skill instead of
+    # inferring "this project" from the cwd's git history.
     ctx_path = proj_dir / "CHAT_CONTEXT.md"
     ctx_path.write_text(f"""# ScienceDash chat-with-project context
 
@@ -213,8 +162,8 @@ DB — runs, hypotheses, decisions, literature notes, agent messages.
 ## Default behaviour
 
 When the user asks about **the project's state, hypotheses, runs,
-decisions, recent literature, brain output, or workhorses**, use the
-`mcp__sciencedash__*` tools — these read the live DB. Do NOT infer
+decisions, recent literature, brain output, or workhorses**, reach the
+live DB through the **`sciencedash` skill** (`sd.py`). Do NOT infer
 project state from git history, file contents, or directory structure
 unless explicitly asked about the codebase.
 
@@ -225,15 +174,13 @@ Write / Edit / Glob / Grep as you normally would.
 
 `{pid}`
 
-Examples:
-- `mcp__sciencedash__get_project(id="{pid}")`
-- `mcp__sciencedash__list_runs(projectId="{pid}")`
-- `mcp__sciencedash__list_hypotheses(projectId="{pid}")`
-- `mcp__sciencedash__list_notes(projectId="{pid}", kind="paper")`
-- `mcp__sciencedash__list_decisions(projectId="{pid}")`
-- `mcp__sciencedash__post_message(projectId="{pid}", body=…, severity=…)`
-- `mcp__sciencedash__create_check_in(projectId="{pid}", body=…)`
-- `mcp__sciencedash__record_decision(projectId="{pid}", kind=…, subjectType=…, subjectId=…, rationale=…)`
+The skill's `call` verb reaches any of the ~24 tools by name:
+- `sd.py call get_entity '{{"kind":"project","id":"{pid}"}}'`
+- `sd.py call query_entity '{{"kind":"run","filters":{{"projectId":"{pid}"}}}}'`
+- `sd.py call query_entity '{{"kind":"hypothesis","filters":{{"projectId":"{pid}"}}}}'`
+- `sd.py call post_message '{{"projectId":"{pid}","body":"…","severity":"…"}}'`
+- `sd.py call create_check_in '{{"projectId":"{pid}","body":"…"}}'`
+- `sd.py call record_decision '{{"projectId":"{pid}","kind":"…","subjectType":"…","subjectId":"…","rationale":"…"}}'`
 
 ## Tool selection cheat sheet (write tools)
 
@@ -246,9 +193,11 @@ Pick the tool that matches the *shape* of what you're recording, not just the me
 | Blocker just appeared | `create_check_in` with `kind="blocker"`. |
 | Post-mortem after a run / sprint | `create_check_in` with `kind="retro"`. |
 | Recording a deliberate decision (promote/park/narrow/budget_escalate/...) | `record_decision`. Always set `evidenceIds: [{{type, id}}, ...]` pointing at the check-in / note / run that grounds it — strong-typed pointers, not prose references. |
-| Direct project-field write (you're authoritative, no human review needed) | `update_project_fields(projectId="{pid}", timeline=…, blockers=…, …)`. |
+| Direct project-field write (you're authoritative, no human review needed) | `update_entity` with `kind="project"`, `id="{pid}"`. |
 | One-line broadcast for `/today` digest | `post_message` with `severity` ∈ info/suggestion/decision/blocker. |
 | Adding an arXiv paper / book / talk | `add_note` (this is the *reading list* — never use it for plans or in-project documents). |
+
+All invoked through the skill, e.g. `sd.py call create_check_in '{{…}}'`.
 
 **Common multi-step pattern for plan adoption:**
 1. `create_check_in(kind="plan", body=<markdown>, proposedPatches=[…])` → returns `id`.
@@ -262,9 +211,10 @@ Workhorses panel, or on a 30-min schedule when the project's autonomy
 config has `workhorse_tick: auto` — sync.py will inject a one-shot
 prompt into this REPL via `tmux send-keys`. The prompt typically reads:
 
-> Tick. Read this project's `nextSteps` via `mcp__sciencedash__get_project`.
-> Pick exactly one concrete action and take it. If `nextSteps` is empty
-> or stale, `create_check_in(kind="plan")` proposing the next 3 steps. Be terse.
+> Tick. Read this project's `nextSteps` via the sciencedash skill
+> (`sd.py call get_entity '{{"kind":"project","id":"{pid}"}}'`). Pick exactly
+> one concrete action and take it. If `nextSteps` is empty or stale, post a
+> `create_check_in` with kind="plan" proposing the next 3 steps. Be terse.
 
 When you receive a tick prompt:
 1. Treat it as a normal user turn — no special handling needed.
@@ -283,10 +233,11 @@ Be terse and decision-shaped — match the dashboard's tone.
 PY
 fi
 
-# Quick connectivity probe.
+# Quick connectivity probe. No -f: any HTTP response (even 401/404) means
+# the host is reachable — we only care that the TCP/TLS handshake works.
 if command -v curl >/dev/null 2>&1; then
   echo "==> probing dashboard"
-  if curl -fsS "$DASHBOARD/api/mcp" -o /dev/null; then
+  if curl -sS --max-time 10 "$DASHBOARD" -o /dev/null; then
     echo "    reachable ✓"
   else
     echo "    NOT REACHABLE — sync will retry every minute, no harm done"

@@ -20,6 +20,7 @@ import {
   jobTmpDir,
 } from "@/lib/ai/agentClient";
 import { extractJson } from "@/lib/ai/client";
+import { buildSciencedashSdkServer } from "@/lib/mcp/sdkServer";
 import { fetchArxivMeta } from "@/lib/ingest/arxiv";
 
 /* ----------------------- small subprocess helper ------------------- */
@@ -638,7 +639,7 @@ export async function runCriticalReview(projectId: string): Promise<
     allowedTools: ["WebSearch", "WebFetch"],
     canUseTool: canUseToolForReview(["arxiv.org"]),
     mcpServers: {
-      sciencedash: { type: "http", url: `${dashboardUrl.replace(/\/$/, "")}/api/mcp` },
+      sciencedash: buildSciencedashSdkServer(),
     },
     maxTurns: 25,
     wallClockMs: 8 * 60_000,

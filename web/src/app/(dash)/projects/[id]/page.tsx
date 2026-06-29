@@ -542,7 +542,7 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
               <div className="stack" style={{ gap: 14 }}>
                 <div>
                   <div style={{ marginBottom: 6, fontSize: 13 }}>
-                    <Hint text="Open Claude Code in your terminal, pointed at the project's local repo with the ScienceDash MCP loaded. Native Claude beats any in-app harness; this is the lowest-friction way to use it.">
+                    <Hint text="Open Claude Code in your terminal, pointed at the project's local repo. It reaches ScienceDash through the installed sciencedash skill. Native Claude beats any in-app harness; this is the lowest-friction way to use it.">
                       <strong>Chat with project</strong>
                     </Hint>
                   </div>
@@ -550,7 +550,6 @@ export default async function ProjectDetailPage({ params, searchParams }: Props)
                     projectId={project.id}
                     localPath={project.localPath}
                     hasRepoLinks={project.repoLinks.length > 0}
-                    dashboardUrl={process.env.SCIENCEDASH_BASE_URL ?? "http://localhost:3000"}
                   />
                 </div>
                 <div>

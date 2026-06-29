@@ -1,17 +1,19 @@
 /**
- * MCP server core — tool registry + JSON-RPC dispatcher.
+ * Tool registry core — the transport-agnostic heart of ScienceDash's tools.
  *
- * Three methods supported: `initialize`, `tools/list`, `tools/call`.
+ * `callTool(name, args)` dispatches to one of the registered handlers and
+ * returns a `ToolResult` (= MCP CallToolResult shape). Consumers reach it
+ * three ways, all in-process: the REST gateway (/api/tool/[name]), the
+ * in-process SDK tool server (sdkServer.ts), and the workhorse sync
+ * endpoints. The old JSON-RPC-over-HTTP transport has been retired.
+ *
  * Tools are registered by importing their group modules; this keeps the
  * surface auditable (every tool is a static reference, not a runtime registration).
  */
 
 import {
-  type JsonRpcRequest,
-  type JsonRpcResponse,
   type ToolDefinition,
   type ToolResult,
-  RPC_ERROR,
 } from "@/lib/mcp/types";
 import { readTools } from "@/lib/mcp/tools/read";
 import { writeTools } from "@/lib/mcp/tools/write";
@@ -51,75 +53,6 @@ export async function callTool(
       content: [{ type: "text", text: `tool ${name} threw: ${msg}` }],
       isError: true,
     };
-  }
-}
-
-/* ----------------------------- dispatcher --------------------------- */
-
-const SERVER_INFO = {
-  protocolVersion: "2025-06-18",
-  capabilities: {
-    tools: { listChanged: false },
-  },
-  serverInfo: {
-    name: "sciencedash-mcp",
-    version: "0.1.0",
-  },
-};
-
-export async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
-  const id = req.id ?? null;
-
-  // Notifications (no id) get no response — fire-and-forget per JSON-RPC 2.0.
-  const isNotification = req.id === undefined;
-
-  if (req.jsonrpc !== "2.0") {
-    if (isNotification) return null;
-    return {
-      jsonrpc: "2.0",
-      id,
-      error: { code: RPC_ERROR.INVALID_REQUEST, message: "expected jsonrpc: '2.0'" },
-    };
-  }
-
-  switch (req.method) {
-    case "initialize":
-      if (isNotification) return null;
-      return { jsonrpc: "2.0", id, result: SERVER_INFO };
-
-    case "notifications/initialized":
-      // Client signalling readiness — no response required.
-      return null;
-
-    case "tools/list":
-      if (isNotification) return null;
-      return { jsonrpc: "2.0", id, result: { tools: listTools() } };
-
-    case "tools/call": {
-      if (isNotification) return null;
-      const params = (req.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
-      if (typeof params.name !== "string") {
-        return {
-          jsonrpc: "2.0",
-          id,
-          error: { code: RPC_ERROR.INVALID_PARAMS, message: "tools/call requires `name` (string)" },
-        };
-      }
-      const result = await callTool(params.name, params.arguments ?? {});
-      return { jsonrpc: "2.0", id, result };
-    }
-
-    case "ping":
-      if (isNotification) return null;
-      return { jsonrpc: "2.0", id, result: {} };
-
-    default:
-      if (isNotification) return null;
-      return {
-        jsonrpc: "2.0",
-        id,
-        error: { code: RPC_ERROR.METHOD_NOT_FOUND, message: `unknown method: ${req.method}` },
-      };
   }
 }
 

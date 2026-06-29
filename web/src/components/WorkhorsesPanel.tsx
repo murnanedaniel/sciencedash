@@ -189,7 +189,7 @@ export async function WorkhorsesPanel({
                   <CopyButton
                     value={startCmd}
                     label="Copy start"
-                    title={`Copy: tmux + claude --mcp-config command for ${w.host}:${w.sessionName}`}
+                    title={`Copy: tmux + claude start command for ${w.host}:${w.sessionName}`}
                   />
                 ) : (
                   <span className="muted small">
@@ -328,16 +328,17 @@ function buildStartCommand({
   // uses double-quotes around the --append-system-prompt arg so the
   // $(cat …) substitution runs.
   const cwd = JSON.stringify(repo); // produces a double-quoted string
-  // mcp-config is per-session (one Workhorse row per session); CHAT_CONTEXT
-  // is project-shared across sessions on the same workhorse.
-  const mcp = `~/.sciencedash/${projectId}/${sessionName}/mcp-config.json`;
+  // CHAT_CONTEXT is project-shared across sessions on the same workhorse.
+  // Tools reach ScienceDash through the installed `sciencedash` skill,
+  // which auto-discovers its URL/token from ~/.sciencedash/{config.json,
+  // auth.env} on this host — no per-session mcp-config.json needed.
   const ctx = `~/.sciencedash/${projectId}/CHAT_CONTEXT.md`;
   // The whole thing must be quoted as the tmux child command. Use a
   // single-quoted outer + escape inner singles via '\''.
   const inner =
     `cd ${cwd} && (` +
-    `claude --continue --mcp-config ${mcp} --append-system-prompt "$(cat ${ctx} 2>/dev/null)" 2>/dev/null || ` +
-    `claude --mcp-config ${mcp} --append-system-prompt "$(cat ${ctx} 2>/dev/null)"` +
+    `claude --continue --append-system-prompt "$(cat ${ctx} 2>/dev/null)" 2>/dev/null || ` +
+    `claude --append-system-prompt "$(cat ${ctx} 2>/dev/null)"` +
     `)`;
   // Couple sync lifetime to workhorse lifetime: ensure sd-sync is alive
   // before attaching the workhorse session. start-sync.sh is idempotent

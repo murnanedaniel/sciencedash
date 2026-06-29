@@ -13,8 +13,8 @@
  * as `body.sessionId` on subsequent turns; the SDK then `resume`s the same
  * subprocess-side session so the model has its prior turns in context.
  *
- * Auth: gated by the proxy (bearer or cookie). MCP server config carries
- * the bearer token so the spawned subprocess can call /api/mcp.
+ * Auth: gated by the proxy (bearer or cookie). Tools run in-process via
+ * the SDK tool server (buildSciencedashSdkServer) — no HTTP MCP hop.
  */
 
 import { NextRequest } from "next/server";
@@ -27,8 +27,7 @@ import {
   type PermissionResult,
 } from "@anthropic-ai/claude-agent-sdk";
 import { buildChatSystemPrompt } from "@/lib/chat/system-prompt";
-import { buildMcpServerConfig } from "@/lib/brain/mcp-client";
-import { resolveDashboardOrigin } from "@/lib/brain/dashboard-origin";
+import { buildSciencedashSdkServer } from "@/lib/mcp/sdkServer";
 import { resolveClaudePath } from "@/lib/ai/agentClient";
 
 export const dynamic = "force-dynamic";
@@ -130,11 +129,6 @@ export async function POST(req: NextRequest) {
     return jsonError(400, "message is required");
   }
 
-  const token = process.env.SCIENCEDASH_AUTH_TOKEN;
-  if (!token) {
-    return jsonError(500, "SCIENCEDASH_AUTH_TOKEN not set in server env");
-  }
-  const dashboardOrigin = await resolveDashboardOrigin();
 
   // Stable cwd across requests. The Claude Agent SDK derives session-
   // storage paths under `~/.claude/projects/<cwd-hash>/<sessionId>.jsonl`,
@@ -147,10 +141,6 @@ export async function POST(req: NextRequest) {
   await mkdir(cwd, { recursive: true });
 
   const systemPrompt = await buildChatSystemPrompt();
-  const mcpServerConfig = buildMcpServerConfig({
-    dashboardUrl: dashboardOrigin,
-    token,
-  });
   // The SDK ships a Linux musl binary inside its node_modules; on most
   // dev machines the user has their own `claude` CLI installed
   // elsewhere. Without an explicit pathToClaudeCodeExecutable
@@ -192,7 +182,7 @@ export async function POST(req: NextRequest) {
             cwd,
             tools: ALLOWED_TOOLS,
             canUseTool: canUseChatTool,
-            mcpServers: { sciencedash: mcpServerConfig },
+            mcpServers: { sciencedash: buildSciencedashSdkServer() },
             // High maxTurns: the chat can chain many tool calls before
             // answering ("create project + dispatch workhorse + post a
             // confirmation message" is already 3 tool calls).

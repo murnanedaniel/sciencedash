@@ -12,6 +12,7 @@ Commands:
   sd.py projects                    list active projects
   sd.py context <projectId>         a project's brief (status, hypothesis, next steps, metrics)
   sd.py log-decision <projectId> "<rationale>"   record a decision on a project
+  sd.py call <tool> '<json-args>'   invoke ANY ScienceDash tool by name (full surface)
 stdlib only.
 """
 import json
@@ -56,13 +57,9 @@ def call(method, path, body=None):
         return {"error": str(e)}
 
 
-def mcp(name, args):
-    """Call an MCP tool over the JSON-RPC endpoint."""
-    res = call("POST", "/api/mcp", {
-        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": name, "arguments": args},
-    })
-    return res
+def tool(name, args):
+    """Invoke a ScienceDash tool via the REST gateway -> {ok, data} | {error}."""
+    return call("POST", f"/api/tool/{name}", args)
 
 
 def cmd_search(query):
@@ -85,38 +82,45 @@ def cmd_search(query):
 
 
 def cmd_projects():
-    res = mcp("query_entity", {"kind": "project", "limit": 100})
-    _print_mcp(res)
+    _print(tool("query_entity", {"kind": "project", "limit": 100}))
     return 0
 
 
 def cmd_context(project_id):
-    res = mcp("get_entity", {"kind": "project", "id": project_id})
-    _print_mcp(res)
+    _print(tool("get_entity", {"kind": "project", "id": project_id}))
     return 0
 
 
 def cmd_log_decision(project_id, rationale):
-    res = mcp("record_decision", {
+    _print(tool("record_decision", {
         "projectId": project_id, "kind": "other",
         "subjectType": "project", "subjectId": project_id,
         "rationale": rationale,
-    })
-    _print_mcp(res)
+    }))
     return 0
 
 
-def _print_mcp(res):
+def cmd_call(name, args_json):
+    try:
+        args = json.loads(args_json) if args_json else {}
+    except Exception as e:
+        print(f"error: args must be JSON ({e})")
+        return 1
+    _print(tool(name, args))
+    return 0
+
+
+def _print(res):
     if res.get("error"):
-        print(f"error: {res['error']} {res.get('detail','')}")
+        print(f"error: {res['error']} {res.get('detail', '')}".rstrip())
         return
-    content = (res.get("result") or {}).get("content")
-    if isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                print(block.get("text", ""))
+    data = res.get("data")
+    if data is None:
+        print("ok")
+    elif isinstance(data, str):
+        print(data)
     else:
-        print(json.dumps(res, indent=2))
+        print(json.dumps(data, indent=2))
 
 
 def main(argv):
@@ -132,6 +136,8 @@ def main(argv):
         return cmd_context(argv[2])
     if cmd == "log-decision" and len(argv) >= 4:
         return cmd_log_decision(argv[2], " ".join(argv[3:]))
+    if cmd == "call" and len(argv) >= 3:
+        return cmd_call(argv[2], argv[3] if len(argv) > 3 else "{}")
     print(__doc__)
     return 1
 

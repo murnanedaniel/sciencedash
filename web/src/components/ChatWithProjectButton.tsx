@@ -4,7 +4,6 @@ import { useState, useTransition } from "react";
 import {
   autoDetectLocalPathAction,
   setLocalPathAction,
-  persistMcpConfigAction,
 } from "@/lib/server/chatActions";
 import { CopyButton } from "@/components/CopyButton";
 
@@ -12,14 +11,12 @@ type Props = {
   projectId: string;
   localPath: string | null;
   hasRepoLinks: boolean;
-  dashboardUrl: string;
 };
 
 export function ChatWithProjectButton({
   projectId,
   localPath,
   hasRepoLinks,
-  dashboardUrl,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [editingPath, setEditingPath] = useState(false);
@@ -28,17 +25,17 @@ export function ChatWithProjectButton({
   const [persistResult, setPersistResult] = useState<string | null>(null);
 
   const sessionName = `sd-${projectId.slice(0, 8)}`;
-  // Build the inner claude invocation — explicit --mcp-config so the
-  // ScienceDash MCP loads regardless of whether claude auto-discovers
-  // .mcp.json, plus --append-system-prompt with a context primer so
-  // Claude knows "this project" means the ScienceDash project (not the
-  // git repo) and uses MCP for state queries.
-  //
-  // The context file is created by `Persist .mcp.json` alongside .mcp.json.
-  // Falls back gracefully if either file is missing.
-  const claudeArgs = localPath
-    ? `--mcp-config ${shellQuote(localPath)}/.mcp.json --append-system-prompt "$(cat ${shellQuote(localPath)}/.sciencedash/CHAT_CONTEXT.md 2>/dev/null)"`
-    : "";
+  // Build the inner claude invocation. Tools reach ScienceDash through the
+  // installed `sciencedash` skill (the ambient bootstrap puts it on every
+  // machine) — no per-project .mcp.json needed. We append a one-line primer
+  // so Claude knows "this project" means the ScienceDash project (not the
+  // git repo) and reaches state via the skill. Keep the primer quote-free
+  // so it nests safely inside the single-quoted tmux command.
+  const primer =
+    `This is ScienceDash project ${projectId}. For project state (runs, ` +
+    `hypotheses, decisions, literature, agent messages) use the sciencedash ` +
+    `skill rather than inferring from git history. Pass projectId=${projectId} to its tools.`;
+  const claudeArgs = localPath ? `--append-system-prompt "${primer}"` : "";
   const tmuxCmd = localPath
     ? `tmux new -As ${sessionName} 'cd ${shellQuote(localPath)} && (claude --continue ${claudeArgs} 2>/dev/null || claude ${claudeArgs})'`
     : "";
@@ -143,8 +140,8 @@ export function ChatWithProjectButton({
           style={{ flexBasis: "100%", marginTop: 6, padding: 10, fontSize: 13 }}
         >
           <div className="muted small" style={{ marginBottom: 6 }}>
-            Paste this into your terminal to start (or resume) Claude in the project
-            with ScienceDash MCP loaded:
+            Paste this into your terminal to start (or resume) Claude in the project.
+            It reaches ScienceDash through the installed <code>sciencedash</code> skill:
           </div>
           <pre
             style={{
@@ -165,23 +162,6 @@ export function ChatWithProjectButton({
               label="Copy attach"
               title="Copy: tmux attach -t … — for re-attaching to an already-running session"
             />
-            <form
-              action={async (fd) => {
-                fd.set("projectId", projectId);
-                fd.set("dashboardUrl", dashboardUrl);
-                await persistMcpConfigAction(fd);
-                setPersistResult(`wrote ${localPath}/.mcp.json`);
-                setTimeout(() => setPersistResult(null), 4000);
-              }}
-            >
-              <button
-                type="submit"
-                className="button buttonSecondary small"
-                title="Write .mcp.json into the project repo so future `claude` runs there auto-load the MCP"
-              >
-                Persist .mcp.json
-              </button>
-            </form>
           </div>
         </div>
       ) : null}

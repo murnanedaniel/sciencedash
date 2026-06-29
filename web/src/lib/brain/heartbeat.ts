@@ -23,7 +23,7 @@ import {
 } from "@/lib/ai/agentClient";
 import { extractJson } from "@/lib/ai/client";
 import { assembleMemory, saveMemoryLog } from "@/lib/brain/memory";
-import { buildMcpServerConfig } from "@/lib/brain/mcp-client";
+import { buildSciencedashSdkServer } from "@/lib/mcp/sdkServer";
 
 const MIN_INTERVAL_MS = 5 * 60_000;
 
@@ -76,19 +76,7 @@ export async function runHeartbeat(
     },
   });
 
-  const dashboardUrl = process.env.SCIENCEDASH_BASE_URL ?? "http://localhost:3000";
-  // Spawned Claude calls /api/mcp through the same proxy that gates every
-  // dashboard request. Inheriting SCIENCEDASH_AUTH_TOKEN from the parent
-  // process's env keeps the heartbeat working under app-level auth.
-  const authToken = process.env.SCIENCEDASH_AUTH_TOKEN;
-  if (!authToken) {
-    return {
-      ok: false,
-      jobId: job.id,
-      error:
-        "SCIENCEDASH_AUTH_TOKEN missing from server env — heartbeat MCP calls would 401",
-    };
-  }
+  // Tools run in-process (no HTTP MCP), so no token/url plumbing needed.
 
   // Build the user-content payload. We stuff the memory tiers in here as
   // markdown blocks; the system prompt tells Claude how to use them.
@@ -118,7 +106,7 @@ export async function runHeartbeat(
     allowedTools: ["WebSearch", "WebFetch"],
     canUseTool: canUseToolForBrainHeartbeat(mode, ["arxiv.org"]),
     mcpServers: {
-      sciencedash: buildMcpServerConfig({ dashboardUrl, token: authToken }),
+      sciencedash: buildSciencedashSdkServer(),
     },
     maxTurns: 20,
     wallClockMs: 6 * 60_000,

@@ -5,7 +5,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { prisma } from "@/lib/prisma";
-import { buildMcpServerConfig } from "@/lib/brain/mcp-client";
 
 const ROOTS_TO_SCAN = ["Research", "code", "src", "Projects", "projects"];
 
@@ -59,127 +58,6 @@ export async function setLocalPathAction(formData: FormData): Promise<void> {
     data: { localPath },
   });
   revalidatePath(`/projects/${projectId}`);
-}
-
-/**
- * Write a `.mcp.json` at <localPath>/.mcp.json so subsequent `claude` runs
- * in that dir auto-load the ScienceDash MCP. Idempotent.
- */
-export async function persistMcpConfigAction(formData: FormData): Promise<{ ok: boolean; error?: string; written?: string } | void> {
-  const projectId = String(formData.get("projectId") ?? "");
-  const dashboardUrl = String(formData.get("dashboardUrl") ?? "http://localhost:3000");
-  if (!projectId) return;
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { localPath: true },
-  });
-  if (!project?.localPath) return;
-
-  const token = process.env.SCIENCEDASH_AUTH_TOKEN;
-  if (!token) {
-    // Without the token the spawned Claude would 401 against the proxy
-    // every MCP call. Surface the misconfig instead of writing a broken
-    // .mcp.json that fails opaquely later.
-    return {
-      ok: false,
-      error:
-        "SCIENCEDASH_AUTH_TOKEN missing from server env — can't write a working .mcp.json",
-    };
-  }
-  const mcpConfig = {
-    mcpServers: {
-      sciencedash: {
-        ...buildMcpServerConfig({ dashboardUrl, token }),
-        // jsonargparse-friendly defaults: pass projectId via env so MCP tool
-        // calls can default the projectId argument.
-        env: { SCIENCEDASH_PROJECT_ID: projectId },
-      },
-    },
-  };
-  const target = path.join(project.localPath, ".mcp.json");
-  await fs.writeFile(target, JSON.stringify(mcpConfig, null, 2) + "\n", "utf-8");
-
-  // Also write a chat-context primer that gets passed as
-  // --append-system-prompt so Claude knows about ScienceDash MCP and
-  // doesn't infer "this project" from the cwd's git history.
-  const sdDir = path.join(project.localPath, ".sciencedash");
-  await fs.mkdir(sdDir, { recursive: true });
-  const contextMd = buildChatContext(projectId);
-  await fs.writeFile(path.join(sdDir, "CHAT_CONTEXT.md"), contextMd, "utf-8");
-
-  // Make sure both files are gitignored.
-  await ensureGitignored(project.localPath, ".mcp.json");
-  await ensureGitignored(project.localPath, ".sciencedash/");
-
-  revalidatePath(`/projects/${projectId}`);
-}
-
-function buildChatContext(projectId: string): string {
-  return `# ScienceDash chat-with-project context
-
-You are in a ScienceDash project workspace. The user is chatting with you
-about a research project that has live state in the ScienceDash dashboard
-DB — runs, hypotheses, decisions, literature notes, agent messages.
-
-## Default behaviour
-
-When the user asks about **the project's state, hypotheses, runs,
-decisions, recent literature, brain output, or workhorses**, use the
-\`mcp__sciencedash__*\` tools — these read the live DB. Do NOT infer
-project state from git history, file contents, or directory structure
-unless the user explicitly asks about the codebase.
-
-When the user asks about **the codebase, code structure, or asks you to
-edit files**, use Bash / Read / Write / Edit / Glob / Grep as you
-normally would.
-
-## This project's id
-
-\`${projectId}\`
-
-Pass this as the \`projectId\` argument to MCP tools. Examples:
-
-- \`mcp__sciencedash__get_project(id="${projectId}")\` — full project state
-- \`mcp__sciencedash__list_runs(projectId="${projectId}")\` — runs across hypotheses
-- \`mcp__sciencedash__list_hypotheses(projectId="${projectId}")\`
-- \`mcp__sciencedash__list_notes(projectId="${projectId}", kind="paper")\` — literature
-- \`mcp__sciencedash__list_decisions(projectId="${projectId}")\`
-- \`mcp__sciencedash__list_messages(projectId="${projectId}", unreadOnly=true)\` — agent feed
-- \`mcp__sciencedash__create_check_in(projectId="${projectId}", body=...)\` — log progress
-- \`mcp__sciencedash__record_decision(projectId="${projectId}", kind=..., subjectType=..., subjectId=..., rationale=...)\`
-- \`mcp__sciencedash__add_note(projectId="${projectId}", kind="paper", title=..., arxivId=..., takeaway=...)\`
-
-## Voice contract
-
-When summarising for the user, be **terse and decision-shaped** — match
-the dashboard's tone. Don't pad with caveats; if the data is clear,
-report it. If it's missing, say so plainly.
-`;
-}
-
-/**
- * Append a pattern to .gitignore (creating the file if missing) iff it
- * isn't already present as a non-comment line. Idempotent.
- */
-async function ensureGitignored(repoRoot: string, pattern: string): Promise<void> {
-  const gitignore = path.join(repoRoot, ".gitignore");
-  let current = "";
-  try {
-    current = await fs.readFile(gitignore, "utf-8");
-  } catch {
-    // file doesn't exist — we'll create it
-  }
-  const present = current
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .some((l) => l === pattern || l === `/${pattern}`);
-  if (present) return;
-  const sep = current.endsWith("\n") || current.length === 0 ? "" : "\n";
-  await fs.writeFile(
-    gitignore,
-    current + sep + (current.length === 0 ? "" : "\n") + `# ScienceDash\n${pattern}\n`,
-    "utf-8",
-  );
 }
 
 /* ------------------------- internal helpers ------------------------- */

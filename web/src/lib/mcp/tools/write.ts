@@ -1198,7 +1198,7 @@ const createMetricDefinition: ToolDefinition = {
 const dispatchWorkhorseSession: ToolDefinition = {
   name: "dispatch_workhorse_session",
   description:
-    "Spin up a brand-new workhorse on `host` for `projectId` against `repo` (absolute path on that host). On the next sync tick (≤60s) the host's sync.py picks up a `start_session` directive, registers the project locally, and launches `claude --mcp-config ... --append-system-prompt ...` in a fresh tmux session. If `initialPrompt` is provided it's tmux-send-keys'd into the REPL once it's up. Idempotent: re-dispatching kills any existing session with the same name. The host MUST already have sync.py running (one-time bootstrap via the workhorse-bootstrap launch endpoint). Returns the queued directive id. Conventionally this is auto-fired with no permission gate — counterpart is `stop_all_workhorses` for the kill switch.",
+    "Spin up a brand-new workhorse on `host` for `projectId` against `repo` (absolute path on that host). On the next sync tick (≤60s) the host's sync.py picks up a `start_session` directive, registers the project locally, and launches `claude --append-system-prompt ...` in a fresh tmux session (tools reach ScienceDash through the installed `sciencedash` skill). If `initialPrompt` is provided it's tmux-send-keys'd into the REPL once it's up. Idempotent: re-dispatching kills any existing session with the same name. The host MUST already have sync.py running (one-time bootstrap via the workhorse-bootstrap launch endpoint). Returns the queued directive id. Conventionally this is auto-fired with no permission gate — counterpart is `stop_all_workhorses` for the kill switch.",
   inputSchema: {
     type: "object",
     properties: {
