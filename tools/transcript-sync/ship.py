@@ -51,6 +51,19 @@ _ENV_ASSIGN = re.compile(
 )
 
 
+# Sessions we never ship: ScienceDash's own spawned agent runs (brain, /chat,
+# quickstart) execute in ephemeral temp dirs — noise. Keep in sync with
+# web/src/lib/ingest/noise.ts.
+NOISE_CWD_PREFIXES = ("/tmp", "/var/tmp", "/private/tmp", "/private/var/folders")
+
+
+def is_noise_cwd(cwd):
+    if not cwd:
+        return False
+    c = cwd.strip()
+    return any(c == p or c.startswith(p + "/") for p in NOISE_CWD_PREFIXES)
+
+
 def git_remote(cwd):
     """Best-effort origin remote URL of cwd — the robust cross-machine project key."""
     try:
@@ -226,6 +239,12 @@ def main():
             if cwd is None:
                 # fall back to decoding the dir name (-a-b-c -> /a/b/c)
                 cwd = "/" + path.parent.name.lstrip("-").replace("-", "/")
+            # Skip noise (ScienceDash's own /tmp agent runs); advance state so we
+            # don't rescan the file every tick.
+            if is_noise_cwd(cwd):
+                state[session_id] = total
+                STATE_FILE.write_text(json.dumps(state))
+                continue
             # One request per session: the server dedups at the session level
             # (fromLine vs shippedLines), so a single append-or-skip is correct.
             # Skip POST for sessions with no extractable text, but still advance

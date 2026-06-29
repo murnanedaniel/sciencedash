@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { redact } from "@/lib/ingest/redact";
 import { resolveProject } from "@/lib/ingest/projectMatch";
+import { isNoiseCwd } from "@/lib/ingest/noise";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,10 @@ export async function POST(req: NextRequest) {
   const cwd = body.cwd?.trim();
   if (!machine || !sessionId || !cwd) {
     return NextResponse.json({ error: "machine, sessionId, cwd are required" }, { status: 400 });
+  }
+  // Drop ScienceDash's own spawned agent runs (ephemeral temp dirs) — noise.
+  if (isNoiseCwd(cwd)) {
+    return NextResponse.json({ ok: true, sessionId, skipped: "noise" });
   }
   const events = Array.isArray(body.events) ? body.events : [];
   const gitRemote = body.gitRemote?.trim() || null;
