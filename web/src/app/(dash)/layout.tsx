@@ -3,6 +3,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { HelpButton } from "@/components/HelpButton";
 import { SyncHealthPill } from "@/components/SyncHealthPill";
 import { prisma } from "@/lib/prisma";
+import { terminalEnabled } from "@/lib/config";
 
 // Every dashboard page reads live data from SQLite. Opt out of Next's
 // static prerender so pages reflect the current DB on every request
@@ -49,6 +50,9 @@ export default async function DashLayout({
           <SidebarLink href="/portfolio" label="Portfolio" hotkey="g O" />
           <SidebarLink href="/brain-chat" label="Brain chat" hotkey="g B" />
           <div className="navDivider" />
+          {terminalEnabled() && (
+            <SidebarLink href="/terminal" label="Terminal" />
+          )}
           <SidebarLink href="/settings" label="Settings" hotkey="g S" />
           <div className="navDivider" />
           <div className="muted small" style={{ padding: "6px 12px", lineHeight: 1.5 }}>

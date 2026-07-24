@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // node-pty is a native addon; keep it out of the server bundle so the
+  // compiled `.node` binding is required at runtime rather than traced by
+  // the bundler (mirrors how better-sqlite3 stays external).
+  serverExternalPackages: ["node-pty"],
+
   // When running `next dev` behind a reverse proxy (Tailscale Funnel,
   // cloudflared) the dev server sees requests with a non-localhost
   // Origin/Host. Next.js 16 wants these allowlisted so server actions
