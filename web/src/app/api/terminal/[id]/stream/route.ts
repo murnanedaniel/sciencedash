@@ -42,12 +42,21 @@ export async function GET(
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
       const send = (event: string, data: unknown) => {
         if (closed) return;
         try {
           controller.enqueue(
             encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
           );
+        } catch {
+          closed = true;
+        }
+      };
+      const comment = (text: string) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`: ${text}\n\n`));
         } catch {
           closed = true;
         }
@@ -71,6 +80,10 @@ export async function GET(
         session.subscribers.delete(onChunk);
         session.exitListeners.delete(onExit);
         req.signal.removeEventListener("abort", onAbort);
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
       };
 
       const onAbort = () => {
@@ -85,10 +98,15 @@ export async function GET(
         }
       };
 
+      // 0. Flush a comment immediately so a buffering reverse proxy
+      //    (Tailscale, cloudflared, nginx) sees bytes and establishes the
+      //    stream right away instead of holding the response.
+      comment("connected");
+
       // 1. Replay current scrollback so the client isn't blank on reconnect.
       //    Distinct `snapshot` event so the client resets its screen before
-      //    writing it — otherwise EventSource auto-reconnect would stack a
-      //    second copy of the scrollback on top of the first.
+      //    writing it — otherwise a reconnect would stack a second copy of
+      //    the scrollback on top of the first.
       send("snapshot", session.buffer);
 
       // 2. If the shell already exited, tell the client and close.
@@ -107,6 +125,11 @@ export async function GET(
       session.subscribers.add(onChunk);
       session.exitListeners.add(onExit);
       req.signal.addEventListener("abort", onAbort);
+
+      // 4. Heartbeat: a shell sits idle at its prompt, so without periodic
+      //    traffic a proxy with a short read timeout would drop the stream.
+      //    A comment every 15s keeps it alive and is ignored by the client.
+      heartbeat = setInterval(() => comment("ping"), 15000);
     },
   });
 

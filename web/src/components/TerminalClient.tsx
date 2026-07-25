@@ -27,7 +27,7 @@ export function TerminalClient() {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Sequential input queue: append here, a single flusher drains it in order.
   const inputQueueRef = useRef<string>("");
@@ -112,6 +112,96 @@ export function TerminalClient() {
       void flushInput();
     });
 
+    let exited = false;
+
+    // Handle one parsed SSE frame (blocks separated by a blank line). A
+    // frame is `:comment` (heartbeat — ignored) or `event:`/`data:` lines.
+    function handleFrame(frame: string) {
+      let event = "message";
+      let data = "";
+      for (const line of frame.split("\n")) {
+        if (line.startsWith(":")) return; // comment / heartbeat
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      }
+      if (event === "snapshot") {
+        // Full scrollback replay (initial connect or reconnect): reset first
+        // so a reconnect doesn't stack a duplicate copy of the buffer.
+        const chunk = JSON.parse(data) as string;
+        term.reset();
+        if (chunk) term.write(chunk);
+        setStatus("live");
+        setErrorMsg(null);
+      } else if (event === "data") {
+        term.write(JSON.parse(data) as string);
+      } else if (event === "exit") {
+        const info = JSON.parse(data) as { exitCode: number; signal?: number };
+        term.write(
+          `\r\n\x1b[90m[process exited: code ${info.exitCode}${
+            info.signal ? `, signal ${info.signal}` : ""
+          }]\x1b[0m\r\n`,
+        );
+        exited = true;
+        setStatus("exited");
+      }
+    }
+
+    // Read the SSE stream via fetch (not EventSource) so we can see the real
+    // HTTP status on failure and control reconnection. Reconnects with
+    // backoff if the connection drops (e.g. a proxy times out) while the
+    // shell is still alive.
+    async function streamLoop(id: string) {
+      let backoff = 500;
+      while (!disposed && !exited) {
+        try {
+          const resp = await fetch(`/api/terminal/${id}/stream`, {
+            headers: { accept: "text/event-stream" },
+            signal: abortRef.current?.signal,
+          });
+          if (!resp.ok || !resp.body) {
+            if (resp.status === 404) {
+              // Session is gone on the server — don't spin forever.
+              setStatus("error");
+              setErrorMsg("session ended on the server");
+              return;
+            }
+            setStatus("error");
+            setErrorMsg(`stream HTTP ${resp.status}`);
+            await sleep(backoff);
+            backoff = Math.min(backoff * 2, 8000);
+            continue;
+          }
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            backoff = 500; // healthy stream — reset backoff
+            buf += decoder.decode(value, { stream: true });
+            let idx: number;
+            while ((idx = buf.indexOf("\n\n")) >= 0) {
+              const frame = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              if (frame) handleFrame(frame);
+            }
+            if (exited) break;
+          }
+          // Server closed the stream. If the shell is still alive, reconnect
+          // (the snapshot on reconnect restores the screen).
+          if (disposed || exited) return;
+          await sleep(backoff);
+          backoff = Math.min(backoff * 2, 8000);
+        } catch (e) {
+          if (disposed || exited) return;
+          if (e instanceof DOMException && e.name === "AbortError") return;
+          // Network blip / proxy drop — reconnect with backoff.
+          await sleep(backoff);
+          backoff = Math.min(backoff * 2, 8000);
+        }
+      }
+    }
+
     async function start() {
       setStatus("connecting");
       setErrorMsg(null);
@@ -134,46 +224,12 @@ export function TerminalClient() {
           return;
         }
         sessionIdRef.current = id;
-
-        const es = new EventSource(`/api/terminal/${id}/stream`);
-        esRef.current = es;
-
-        es.addEventListener("snapshot", (ev) => {
-          // Full scrollback replay (initial connect or auto-reconnect):
-          // reset first so a reconnect doesn't stack a duplicate copy.
-          const chunk = JSON.parse((ev as MessageEvent).data) as string;
-          term.reset();
-          if (chunk) term.write(chunk);
-          setStatus("live");
-        });
-        es.addEventListener("data", (ev) => {
-          const chunk = JSON.parse((ev as MessageEvent).data) as string;
-          term.write(chunk);
-        });
-        es.addEventListener("exit", (ev) => {
-          const info = JSON.parse((ev as MessageEvent).data) as {
-            exitCode: number;
-            signal?: number;
-          };
-          term.write(
-            `\r\n\x1b[90m[process exited: code ${info.exitCode}${
-              info.signal ? `, signal ${info.signal}` : ""
-            }]\x1b[0m\r\n`,
-          );
-          setStatus("exited");
-          es.close();
-        });
-        es.onerror = () => {
-          // EventSource retries on its own; only surface an error if the
-          // session is actually gone (we'll find out on the next snapshot).
-          if (es.readyState === EventSource.CLOSED) {
-            setStatus("error");
-            setErrorMsg("stream closed");
-          }
-        };
+        abortRef.current = new AbortController();
 
         // Sync the real grid size to the PTY now that it exists.
         void sendResize(term.cols, term.rows);
+
+        void streamLoop(id);
       } catch (e) {
         if (disposed) return;
         setStatus("error");
@@ -198,7 +254,7 @@ export function TerminalClient() {
       disposed = true;
       ro.disconnect();
       onDataDisp.dispose();
-      esRef.current?.close();
+      abortRef.current?.abort();
       const id = sessionIdRef.current;
       if (id) {
         // Best-effort kill so we don't leak shells when leaving the page.
@@ -278,4 +334,8 @@ export function TerminalClient() {
       />
     </div>
   );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
