@@ -18,24 +18,22 @@ export function autoDeployEnabled(): boolean {
 }
 
 /**
- * The web terminal (a real PTY-backed shell reachable from the dashboard)
- * is OFF unless explicitly enabled. It's meant for one specific pain: the
- * dashboard runs the local `claude` binary for every AI feature, and when
- * that login expires you need shell access to the box to run
- * `claude setup-token` — but you may only be able to reach the box through
- * the dashboard (Tailscale) with no SSH. This exposes an interactive shell
- * as the server user, so it stays behind an explicit opt-in and a fresh
- * public clone never ships a shell.
+ * The web terminal is a real PTY-backed shell reachable from the dashboard
+ * at /terminal. It's meant for one specific pain: the dashboard runs the
+ * local `claude` binary for every AI feature, and when that login expires
+ * you need shell access to the box to run `claude setup-token` — but you may
+ * only be able to reach the box through the dashboard (Tailscale) with no
+ * SSH.
  *
- * Note: an authenticated user can already run arbitrary commands via the
- * chat surface's auto-approved Bash tool, so this is a more direct handle
- * on a capability that already exists behind the same auth — not a new
- * trust boundary. It's still gated so it's an intentional choice, not a
- * default.
+ * It's ON by default; set SCIENCEDASH_TERMINAL_ENABLED=0 (or "false") to
+ * opt out. An authenticated user can already run arbitrary commands via the
+ * chat surface's auto-approved Bash tool, so this is a more direct handle on
+ * a capability that already exists behind the same auth — not a new trust
+ * boundary. Auth is still enforced by proxy.ts on every route.
  */
 export function terminalEnabled(): boolean {
   const v = process.env.SCIENCEDASH_TERMINAL_ENABLED;
-  return v === "1" || v === "true";
+  return v !== "0" && v !== "false";
 }
 
 /**

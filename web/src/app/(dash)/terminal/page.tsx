@@ -24,14 +24,15 @@ export default function TerminalPage() {
         </header>
         <div className="card">
           <p className="muted">
-            The web terminal is disabled. Set{" "}
-            <code>SCIENCEDASH_TERMINAL_ENABLED=1</code> in the dashboard&apos;s
-            environment and restart the server to enable it.
+            The web terminal is disabled because{" "}
+            <code>SCIENCEDASH_TERMINAL_ENABLED</code> is set to{" "}
+            <code>0</code>. Remove that override (it&apos;s on by default) and
+            restart the server to re-enable it.
           </p>
           <p className="muted small" style={{ marginTop: 8 }}>
-            It opens a real shell on this machine as the server user — leave it
-            off unless you need remote shell access (e.g. to re-run{" "}
-            <code>claude setup-token</code> after a login times out).
+            It opens a real shell on this machine as the server user — used to
+            re-run <code>claude setup-token</code> when a login times out and
+            the box is only reachable through the dashboard.
           </p>
         </div>
       </div>

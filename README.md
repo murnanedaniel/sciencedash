@@ -36,7 +36,7 @@ No `ANTHROPIC_API_KEY` — AI features go through Claude Code (`claude login`) s
 
 ScienceDash runs entirely on `localhost`. To reach it from other devices or to connect remote **workhorse** agents, put it behind a reverse proxy (Tailscale, cloudflared, nginx) and set `SCIENCEDASH_BASE_URL`. See `docs/cluster-integration.md`. Auto-deploy (the `/settings` deploy widget) is author-specific tooling, **off unless** you set `SCIENCEDASH_AUTO_DEPLOY_ENABLED=1`.
 
-**Web terminal.** When you reach the box only through the dashboard (e.g. Tailscale, no SSH) and Claude Code's login times out, every AI feature breaks with no way to re-auth. Set `SCIENCEDASH_TERMINAL_ENABLED=1` to expose `/terminal`, an interactive shell on the machine as the server user — run `claude setup-token`, open the printed URL, and paste the code back to sign in again. It's **off by default**: it's a real shell behind your dashboard login, so a fresh clone never ships one. (An authenticated session can already run commands via the chat's Bash tool; the terminal is a more direct handle on the same capability, behind the same auth.)
+**Web terminal.** When you reach the box only through the dashboard (e.g. Tailscale, no SSH) and Claude Code's login times out, every AI feature breaks with no way to re-auth. `/terminal` is an interactive shell on the machine as the server user — run `claude setup-token`, open the printed URL, and paste the code back to sign in again. It's **on by default**; set `SCIENCEDASH_TERMINAL_ENABLED=0` to disable it. It's a real shell behind your dashboard login — but an authenticated session can already run commands via the chat's Bash tool, so the terminal is a more direct handle on the same capability, behind the same auth.
 
 ---
 
