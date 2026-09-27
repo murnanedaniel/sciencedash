@@ -7,7 +7,7 @@
 
 import { NextRequest } from "next/server";
 import { forumEnabled } from "@/lib/config";
-import { control, type ForumControl } from "@/lib/forum/sessions";
+import { control, setTurnBudget, type ForumControl } from "@/lib/forum/sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,7 @@ const ACTIONS: ReadonlySet<string> = new Set([
   "abort",
   "end",
   "resync",
+  "set_budget",
 ]);
 
 export async function POST(
@@ -27,9 +28,9 @@ export async function POST(
 
   const { id } = await params;
 
-  let body: { action?: string };
+  let body: { action?: string; turnBudget?: number };
   try {
-    body = (await req.json()) as { action?: string };
+    body = (await req.json()) as { action?: string; turnBudget?: number };
   } catch {
     return jsonError(400, "invalid JSON");
   }
@@ -39,7 +40,15 @@ export async function POST(
     return jsonError(400, `action must be one of ${[...ACTIONS].join(", ")}`);
   }
 
-  const result = await control(id, action as ForumControl);
+  let result: { ok: boolean; error?: string };
+  if (action === "set_budget") {
+    if (typeof body.turnBudget !== "number" || !Number.isFinite(body.turnBudget)) {
+      return jsonError(400, "turnBudget must be a number");
+    }
+    result = await setTurnBudget(id, body.turnBudget);
+  } else {
+    result = await control(id, action as ForumControl);
+  }
   if (!result.ok) return jsonError(400, result.error ?? "control failed");
 
   return Response.json({ ok: true });

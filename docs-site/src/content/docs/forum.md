@@ -67,6 +67,11 @@ a turn budget (default 6). When it's spent, the forum parks and waits for
 you. Your next message resets it — the guard exists to bound *agents*, not to
 ration you.
 
+You can change the budget at any time by clicking its number in the status
+strip. It takes effect from the next turn. Raising it on a parked forum
+doesn't restart it — press Resume (which also resets the count) or send a
+message.
+
 The status strip shows `turns spent / budget` and a running dollar figure.
 That figure covers Claude turns only: `codex exec` reports token usage, not
 dollars, so counting it would understate the total. Better an obviously
