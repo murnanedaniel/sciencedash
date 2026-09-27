@@ -11,7 +11,7 @@
  * surface untrusted markdown, run the output through DOMPurify here.
  */
 
-import { marked } from "marked";
+import { Marked, marked } from "marked";
 
 const cache = new Map<string, string>();
 const CACHE_LIMIT = 200;
@@ -30,4 +30,52 @@ export function renderMarkdown(source: string | null | undefined): string {
   }
   cache.set(source, html);
   return html;
+}
+
+/* ------------------------- untrusted content ------------------------- */
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const SAFE_HREF = /^(https?:|mailto:)/i;
+
+/**
+ * A separate marked instance for text the user did NOT write — forum
+ * participants' turns, which can echo whatever a web page contained. Kept
+ * apart from `renderMarkdown` so trusted pages keep inline HTML.
+ *
+ *  - Raw HTML is escaped, so `<script>` / `onerror=` render as text.
+ *  - Links survive only for http(s)/mailto; anything else (`javascript:`)
+ *    keeps its text and loses the link. Links open in a new tab.
+ *  - Images become plain links: an inline image would make the viewer's
+ *    browser fetch an arbitrary URL just by opening the forum.
+ */
+const untrusted = new Marked({
+  gfm: true,
+  async: false,
+  renderer: {
+    html(token) {
+      return escapeHtml(token.text);
+    },
+    link(token) {
+      const inner = this.parser.parseInline(token.tokens);
+      if (!SAFE_HREF.test(token.href)) return inner;
+      return `<a href="${escapeHtml(token.href)}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
+    },
+    image(token) {
+      const label = escapeHtml(token.text || token.href);
+      if (!SAFE_HREF.test(token.href)) return label;
+      return `<a href="${escapeHtml(token.href)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    },
+  },
+});
+
+export function renderUntrustedMarkdown(source: string): string {
+  if (!source) return "";
+  return untrusted.parse(source) as string;
 }

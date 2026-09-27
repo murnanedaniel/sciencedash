@@ -37,6 +37,53 @@ export function terminalEnabled(): boolean {
 }
 
 /**
+ * The forum is a multi-party conversation surface: the user plus two or more
+ * AI participants (Claude via the Agent SDK, Codex via `codex exec`) talking
+ * to each other, with the user watching and able to interject.
+ *
+ * ON by default; set SCIENCEDASH_FORUM_ENABLED=0 to opt out. Participants get
+ * a read-and-research tool surface only (no Write/Edit/Bash, codex sandboxed
+ * read-only), so this is strictly narrower than the chat surface that's
+ * already exposed behind the same auth.
+ */
+export function forumEnabled(): boolean {
+  const v = process.env.SCIENCEDASH_FORUM_ENABLED;
+  return v !== "0" && v !== "false";
+}
+
+/**
+ * Default model ids for new forum participants. Deliberately env-driven
+ * rather than hardcoded: model tiers turn over far faster than this code
+ * does, and changing which tier debates should not require a deploy.
+ */
+export function forumClaudeModel(): string {
+  return process.env.SCIENCEDASH_FORUM_CLAUDE_MODEL?.trim() || "claude-opus-5-5";
+}
+
+export function forumCodexModel(): string {
+  return process.env.SCIENCEDASH_FORUM_CODEX_MODEL?.trim() || "gpt-5.6-sol";
+}
+
+/** The `codex` executable driving Codex participants. */
+export function codexBin(): string {
+  return process.env.SCIENCEDASH_CODEX_BIN?.trim() || "codex";
+}
+
+/**
+ * On hosts that restrict unprivileged user namespaces (Ubuntu 24.04 defaults
+ * kernel.apparmor_restrict_unprivileged_userns=1), Codex's bundled bubblewrap
+ * sandbox fails with "bwrap: loopback: Failed RTM_NEWADDR: Operation not
+ * permitted" and Codex can read nothing. The legacy Landlock sandbox needs no
+ * namespaces and still enforces read-only (reads succeed, writes get EACCES).
+ * It is incompatible with workspace-write, which the forum never uses. Off by
+ * default.
+ */
+export function codexLegacyLandlock(): boolean {
+  const v = process.env.SCIENCEDASH_CODEX_LEGACY_LANDLOCK;
+  return v === "1" || v === "true";
+}
+
+/**
  * Absolute path to the repo root on disk. The Next app runs with cwd=web/,
  * so the repo root is its parent by default. Override SCIENCEDASH_REPO_ROOT
  * for unusual layouts.
@@ -56,6 +103,11 @@ export function stateDir(): string {
     process.env.SCIENCEDASH_STATE_DIR ??
     path.join(os.homedir(), ".sciencedash")
   );
+}
+
+/** Where forum uploads and other durable per-forum state live. */
+export function forumStateDir(): string {
+  return path.join(stateDir(), "forum");
 }
 
 /** The deploy script the auto-deploy timer / manual trigger invokes. */
