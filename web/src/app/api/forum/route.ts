@@ -13,7 +13,7 @@ import {
   forumCodexModel,
   forumEnabled,
 } from "@/lib/config";
-import { reconcileStale } from "@/lib/forum/sessions";
+import { clampTurnBudget, reconcileStale } from "@/lib/forum/sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
 
   const turnBudget =
     typeof body.turnBudget === "number" && Number.isFinite(body.turnBudget)
-      ? Math.min(40, Math.max(1, Math.floor(body.turnBudget)))
+      ? clampTurnBudget(body.turnBudget)
       : 6;
 
   // Roster: caller-supplied or the default Claude+Codex pairing.

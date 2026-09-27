@@ -36,6 +36,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdir, stat } from "node:fs/promises";
 
+/**
+ * Bounds on a forum's turn budget, shared by creation and later edits so the
+ * two can't drift apart. The ceiling is the spend guard's guard: even a
+ * deliberately long debate stops for the human eventually.
+ */
+export const MIN_TURN_BUDGET = 1;
+export const MAX_TURN_BUDGET = 40;
+
+export function clampTurnBudget(n: number): number {
+  return Math.min(MAX_TURN_BUDGET, Math.max(MIN_TURN_BUDGET, Math.floor(n)));
+}
+
 /* ------------------------------ wire types ------------------------------ */
 
 export type ForumMessageDTO = {
@@ -846,6 +858,37 @@ export async function postHumanMessage(
   await emitStatus(forumId);
   kick(forumId);
   return dto;
+}
+
+/**
+ * Change the budget without starting, resuming, or pausing the forum. Raising
+ * it on a parked forum still requires Resume or a human message; lowering it
+ * below turnsSpent on a running forum parks it before the next turn.
+ */
+export async function setTurnBudget(
+  forumId: string,
+  value: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const forum = await prisma.forum.findUnique({ where: { id: forumId } });
+  if (!forum) return { ok: false, error: "no such forum" };
+  if (forum.status === "ended") return { ok: false, error: "forum has ended" };
+
+  const updated = await prisma.forum.update({
+    where: { id: forumId },
+    data: { turnBudget: clampTurnBudget(value) },
+  });
+  // Only nudge toward Resume when the budget is what parked the forum and the
+  // new one frees it. A forum idle for another reason (brand new, or waiting
+  // on "@human") isn't blocked by its budget, so the hint would mislead.
+  const wasBudgetParked =
+    forum.status === "idle" && forum.turnsSpent >= forum.turnBudget;
+  await emitStatus(
+    forumId,
+    wasBudgetParked && updated.turnsSpent < updated.turnBudget
+      ? "budget raised — press Resume to continue"
+      : undefined,
+  );
+  return { ok: true };
 }
 
 export type ForumControl = "pause" | "resume" | "abort" | "end" | "resync";

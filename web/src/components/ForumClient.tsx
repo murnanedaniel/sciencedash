@@ -313,6 +313,7 @@ export function ForumClient({ forumId }: Props) {
         connected={connected}
         note={note}
         onControl={(action) => post("control", { action })}
+        onSetBudget={(turnBudget) => post("control", { action: "set_budget", turnBudget })}
       />
 
       <div
@@ -483,6 +484,7 @@ function StatusStrip({
   connected,
   note,
   onControl,
+  onSetBudget,
 }: {
   forum: ForumState | null;
   speaking: string | null;
@@ -490,9 +492,22 @@ function StatusStrip({
   connected: boolean;
   note: string | null;
   onControl: (action: string) => void;
+  onSetBudget: (turnBudget: number) => void;
 }) {
+  const [budgetInput, setBudgetInput] = useState<string | null>(null);
+  const editingBudget = useRef(false);
   const ended = forum?.status === "ended";
   const running = forum?.status === "running";
+
+  const commitBudget = () => {
+    // Enter can also trigger blur; consume the edit once, including on Escape.
+    if (!editingBudget.current) return;
+    editingBudget.current = false;
+    setBudgetInput(null);
+    if (ended || !budgetInput?.trim()) return;
+    const value = Number(budgetInput);
+    if (Number.isFinite(value)) onSetBudget(value);
+  };
 
   return (
     <div
@@ -514,7 +529,53 @@ function StatusStrip({
         </span>
         {!connected ? <span className="muted">reconnecting…</span> : null}
         <span className="muted">
-          turns {forum?.turnsSpent ?? 0}/{forum?.turnBudget ?? 0}
+          turns {forum?.turnsSpent ?? 0}/
+          {ended || !forum ? (
+            forum?.turnBudget ?? 0
+          ) : budgetInput !== null ? (
+            <input
+              type="number"
+              min={1}
+              max={40}
+              aria-label="Turn budget"
+              autoFocus
+              value={budgetInput}
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => setBudgetInput(e.target.value)}
+              onBlur={commitBudget}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitBudget();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  editingBudget.current = false;
+                  setBudgetInput(null);
+                }
+              }}
+              style={{ width: "3.5em", font: "inherit" }}
+            />
+          ) : (
+            <button
+              type="button"
+              className="muted"
+              title="Edit turn budget"
+              onClick={() => {
+                editingBudget.current = true;
+                setBudgetInput(String(forum.turnBudget));
+              }}
+              style={{
+                border: "none",
+                background: "transparent",
+                padding: 0,
+                font: "inherit",
+                textDecoration: "underline dotted",
+                cursor: "pointer",
+              }}
+            >
+              {forum.turnBudget}
+            </button>
+          )}
         </span>
         {forum && forum.costUsd > 0 ? (
           <span className="muted" title="Claude turns only — codex reports tokens, not dollars">
