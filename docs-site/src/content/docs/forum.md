@@ -132,26 +132,44 @@ system prompt, so you don't have to paste context in by hand.
 |---|---|---|
 | `SCIENCEDASH_FORUM_ENABLED` | on | Set `0` to hide the surface entirely. |
 | `SCIENCEDASH_FORUM_CLAUDE_MODEL` | `claude-opus-5-5` | Model for Claude participants. |
-| `SCIENCEDASH_FORUM_CODEX_MODEL` | `gpt-5.6-sol` | Model for Codex participants. |
+| `SCIENCEDASH_FORUM_CODEX_MODEL` | `gpt-6-astra` | Model for Codex participants. Needs codex-cli 0.157 or newer. |
 | `SCIENCEDASH_CODEX_BIN` | `codex` | Path to the Codex CLI. |
-| `SCIENCEDASH_CODEX_LEGACY_LANDLOCK` | off | Set `1` if Codex can't read files (see below). |
 
 Models are env-driven rather than hardcoded because tiers turn over far
 faster than this code does — changing which models debate shouldn't need a
 deploy.
 
 Codex participants require the `codex` CLI installed and authenticated
-(ChatGPT subscription or API key). On a ChatGPT plan only the plain tiers
-work — the `*-codex` model names are API-key-only. If Codex can't complete a
+(ChatGPT subscription or API key). The `*-codex` model names are
+API-key-only; on a ChatGPT plan use the plain tiers (`gpt-6-astra`,
+`gpt-5.6-sol`, `gpt-5.6-terra`). If Codex can't complete a
 turn, the forum posts the error as a system message and parks rather than
 letting the other participant monologue.
 
 **If Codex can't read files** — its commands fail with
-`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` — the host
-blocks unprivileged user namespaces (Ubuntu 24.04's default), which Codex's
-bundled sandbox needs. Either install the system `bubblewrap` package, or set
-`SCIENCEDASH_CODEX_LEGACY_LANDLOCK=1` to use Codex's Landlock sandbox, which
-needs no namespaces and still enforces read-only.
+`bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` or
+`bwrap: setting up uid map: Permission denied` — the host blocks unprivileged
+user namespaces (Ubuntu 24.04's default), which Codex's bubblewrap sandbox
+needs. Install `bubblewrap` and give it a scoped AppArmor profile, which
+leaves the restriction in place for everything else:
+
+```sh
+sudo apt install bubblewrap
+sudo tee /etc/apparmor.d/bwrap >/dev/null <<'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+bwrap --dev-bind / / --unshare-net echo ok   # should print "ok"
+```
+
+(Older Codex CLIs offered a Landlock-only fallback; 0.157 removed it, and it
+never supported edits.)
 
 ## Adding a participant type
 

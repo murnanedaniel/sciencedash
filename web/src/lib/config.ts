@@ -61,26 +61,12 @@ export function forumClaudeModel(): string {
 }
 
 export function forumCodexModel(): string {
-  return process.env.SCIENCEDASH_FORUM_CODEX_MODEL?.trim() || "gpt-5.6-sol";
+  return process.env.SCIENCEDASH_FORUM_CODEX_MODEL?.trim() || "gpt-6-astra";
 }
 
 /** The `codex` executable driving Codex participants. */
 export function codexBin(): string {
   return process.env.SCIENCEDASH_CODEX_BIN?.trim() || "codex";
-}
-
-/**
- * On hosts that restrict unprivileged user namespaces (Ubuntu 24.04 defaults
- * kernel.apparmor_restrict_unprivileged_userns=1), Codex's bundled bubblewrap
- * sandbox fails with "bwrap: loopback: Failed RTM_NEWADDR: Operation not
- * permitted" and Codex can read nothing. The legacy Landlock sandbox needs no
- * namespaces and still enforces read-only (reads succeed, writes get EACCES).
- * It is incompatible with workspace-write, which the forum never uses. Off by
- * default.
- */
-export function codexLegacyLandlock(): boolean {
-  const v = process.env.SCIENCEDASH_CODEX_LEGACY_LANDLOCK;
-  return v === "1" || v === "true";
 }
 
 /**
