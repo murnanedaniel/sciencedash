@@ -31,7 +31,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { codexBin, codexLegacyLandlock } from "@/lib/config";
+import { codexBin } from "@/lib/config";
 import type {
   DriverContext,
   ForumTurnEvent,
@@ -153,11 +153,6 @@ export const codexDriver: ParticipantDriver = {
       "-o",
       lastMessageFile,
     ];
-    // On hosts that block unprivileged user namespaces (Ubuntu 24.04's
-    // default) the bundled bubblewrap sandbox can't start and Codex can read
-    // nothing. Landlock still enforces read-only without namespaces. Opt-in:
-    // see codexLegacyLandlock() in config.ts.
-    if (codexLegacyLandlock()) args.push("--enable", "use_legacy_landlock");
     if (ctx.sessionRef) args.push("resume", ctx.sessionRef);
     args.push(fullPrompt);
 
