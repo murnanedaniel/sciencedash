@@ -30,6 +30,7 @@ import { buildForumSystemPrompt } from "@/lib/forum/prompt";
 import {
   TURN_WALL_CLOCK_MS,
   type ForumTurnEvent,
+  type ForumTurnResult,
   type ParticipantDriver,
 } from "@/lib/forum/types";
 import { tmpdir } from "node:os";
@@ -500,6 +501,23 @@ export function parkNote(
 /* ------------------------------- scheduler ------------------------------- */
 
 /**
+ * Driver costs are session totals: Claude's total_cost_usd includes earlier
+ * turns when resuming. Subtract the stored total only for the same session;
+ * a fresh session starts at zero. Null leaves the baseline untouched so an
+ * aborted turn's unreported spend is absorbed by the next reported delta.
+ */
+function sessionTurnCost(
+  participant: { sessionRef: string | null; sessionCostUsd: number },
+  result: ForumTurnResult,
+): number | null {
+  if (result.costUsd === null) return null;
+  const baseline = result.sessionRef === participant.sessionRef
+    ? participant.sessionCostUsd
+    : 0;
+  return Math.max(0, result.costUsd - baseline);
+}
+
+/**
  * Run one participant's turn end to end: compose, drive, persist.
  * Returns false if the forum should stop looping.
  */
@@ -573,13 +591,18 @@ async function runTurn(forumId: string, handle: string): Promise<boolean> {
         }),
     });
     const events = result.events.map(clampEvent);
+    const turnCost = sessionTurnCost(me, result);
 
     // Persist the resume handle even on a failed turn — the thread may well
     // exist driver-side, and losing the ref would silently fork the context.
-    if (result.sessionRef && result.sessionRef !== me.sessionRef) {
+    const sessionChanged = result.sessionRef && result.sessionRef !== me.sessionRef;
+    if (sessionChanged || result.costUsd !== null) {
       await prisma.forumParticipant.update({
         where: { id: me.id },
-        data: { sessionRef: result.sessionRef },
+        data: {
+          ...(sessionChanged ? { sessionRef: result.sessionRef } : {}),
+          ...(result.costUsd !== null ? { sessionCostUsd: result.costUsd } : {}),
+        },
       });
     }
 
@@ -598,13 +621,13 @@ async function runTurn(forumId: string, handle: string): Promise<boolean> {
           role: "agent",
           text,
           events,
-          costUsd: result.costUsd,
+          costUsd: turnCost,
           addressed: parseAddressed(text, handles, "last"),
         });
-        if (result.costUsd) {
+        if (turnCost) {
           await prisma.forum.update({
             where: { id: forumId },
-            data: { costUsd: { increment: result.costUsd } },
+            data: { costUsd: { increment: turnCost } },
           });
         }
       }
@@ -635,7 +658,7 @@ async function runTurn(forumId: string, handle: string): Promise<boolean> {
       role: "agent",
       text: text || "(no response)",
       events,
-      costUsd: result.costUsd,
+      costUsd: turnCost,
       addressed: parseAddressed(text, handles, "last"),
     });
 
@@ -643,7 +666,7 @@ async function runTurn(forumId: string, handle: string): Promise<boolean> {
       where: { id: forumId },
       data: {
         turnsSpent: { increment: 1 },
-        ...(result.costUsd ? { costUsd: { increment: result.costUsd } } : {}),
+        ...(turnCost ? { costUsd: { increment: turnCost } } : {}),
       },
     });
 
@@ -961,7 +984,7 @@ export async function control(
       // for when a participant has visibly lost the plot.
       await prisma.forumParticipant.updateMany({
         where: { forumId },
-        data: { sessionRef: null },
+        data: { sessionRef: null, sessionCostUsd: 0 },
       });
       await appendMessage(forumId, {
         author: "system",

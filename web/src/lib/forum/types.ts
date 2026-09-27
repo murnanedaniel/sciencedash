@@ -37,7 +37,10 @@ export type ForumTurnResult = {
    * `session_id` / codex `thread_id`). Null if the driver never reported one.
    */
   sessionRef: string | null;
-  /** Dollar cost where the driver reports it. Codex reports tokens, not USD. */
+  /**
+   * Cumulative dollar cost for this driver-side session, not just this turn.
+   * The scheduler records the delta. Codex reports tokens, not USD.
+   */
   costUsd: number | null;
   events: ForumTurnEvent[];
   /** Non-null if the turn failed. `text` may still hold a partial answer. */
