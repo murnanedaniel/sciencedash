@@ -238,6 +238,7 @@ model Project {
   agentMessages       AgentMessage[]
   workhorses          Workhorse[]
   threads             Thread[]
+  forums              Forum[]
 
   @@index([programmeId])
 }
@@ -677,4 +678,124 @@ model Turn {
 
   @@unique([threadId, idx])
   @@index([threadId])
+}
+
+// ---------------------------------------------------------------------------
+// Forum — a multi-party conversation between the user and two or more AI
+// participants (Claude via the Agent SDK, Codex via `codex exec`).
+//
+// The forum transcript in this table is the SOURCE OF TRUTH. Each participant
+// also keeps its own private conversation tape on the driver side (an SDK
+// session, a codex thread); those are lossy *projections* of this transcript,
+// because a participant only ever sees the others' turns relayed to it as
+// input. `ForumParticipant.sessionRef` is the handle used to resume one.
+// ---------------------------------------------------------------------------
+
+enum ForumStatus {
+  /// No turn in flight; waiting for a human message or a resume.
+  idle
+  /// The scheduler is running agent turns.
+  running
+  /// Human hit pause; the queue is intact but nothing is dispatched.
+  paused
+  /// Terminal — no further turns will run.
+  ended
+}
+
+/// Which driver runs a participant's turns.
+enum ForumDriver {
+  claude
+  codex
+}
+
+enum ForumRole {
+  human
+  agent
+  system
+}
+
+model Forum {
+  id           String      @id @default(cuid())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  title        String
+  /// The opening question/topic the forum was convened around. Injected into
+  /// every participant's system prompt so nobody loses the thread.
+  topic        String      @default("")
+
+  /// Optional project link — pulls that project's brief into the system
+  /// prompts and scopes any decisions the forum records.
+  projectId    String?
+  project      Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  status       ForumStatus @default(idle)
+
+  /// Agent turns the scheduler may run before parking for human input. The
+  /// spend guard: two agents left alone will happily talk forever.
+  turnBudget   Int         @default(6)
+  /// Agent turns consumed since the last human message. Reset on interject.
+  turnsSpent   Int         @default(0)
+  /// Running spend. Only drivers that report cost contribute (the Claude SDK
+  /// does; `codex exec` reports tokens, not dollars).
+  costUsd      Float       @default(0)
+
+  endedAt      DateTime?
+
+  participants ForumParticipant[]
+  messages     ForumMessage[]
+
+  @@index([projectId])
+  @@index([updatedAt])
+}
+
+model ForumParticipant {
+  id         String      @id @default(cuid())
+  forumId    String
+  forum      Forum       @relation(fields: [forumId], references: [id], onDelete: Cascade)
+
+  /// Address used in the transcript and for @-mentions ("claude", "codex").
+  handle     String
+  driver     ForumDriver
+  /// Model id handed to the driver. Deliberately a plain string and not an
+  /// enum: tiers change faster than migrations do.
+  model      String
+  /// Free-text persona appended to this participant's system prompt.
+  persona    String      @default("")
+
+  /// Driver-side resume handle — SDK `session_id` / codex `thread_id`.
+  /// Null until the participant has spoken once. Cleared by a resync.
+  sessionRef String?
+
+  /// Round-robin order when no one is explicitly addressed.
+  seat       Int         @default(0)
+  active     Boolean     @default(true)
+
+  @@unique([forumId, handle])
+  @@index([forumId])
+}
+
+model ForumMessage {
+  id         String    @id @default(cuid())
+  forumId    String
+  forum      Forum     @relation(fields: [forumId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+
+  /// Monotonic position in the transcript. The relay builder orders by this.
+  idx        Int
+  /// "human", a participant handle, or "system".
+  author     String
+  role       ForumRole
+  text       String
+
+  /// Tool calls / results / reasoning captured alongside the text, as a JSON
+  /// array of ForumTurnEvent. Rendered collapsed in the UI; never relayed to
+  /// other participants (they get the prose only).
+  eventsJson String?
+  costUsd    Float?
+  /// Handle this message explicitly addressed via @mention, if any.
+  addressed  String?
+
+  @@unique([forumId, idx])
+  @@index([forumId, createdAt])
 }

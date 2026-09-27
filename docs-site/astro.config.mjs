@@ -36,6 +36,7 @@ export default defineConfig({
             { label: "How it works", link: "/tutorial/" },
             { label: "Project setup", link: "/setup/" },
             { label: "Remote workhorses", link: "/cluster-integration/" },
+            { label: "Forum", link: "/forum/" },
           ],
         },
         {

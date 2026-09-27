@@ -3,7 +3,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { HelpButton } from "@/components/HelpButton";
 import { SyncHealthPill } from "@/components/SyncHealthPill";
 import { prisma } from "@/lib/prisma";
-import { terminalEnabled } from "@/lib/config";
+import { forumEnabled, terminalEnabled } from "@/lib/config";
 
 // Every dashboard page reads live data from SQLite. Opt out of Next's
 // static prerender so pages reflect the current DB on every request
@@ -49,6 +49,7 @@ export default async function DashLayout({
           <div className="navDivider" />
           <SidebarLink href="/portfolio" label="Portfolio" hotkey="g O" />
           <SidebarLink href="/brain-chat" label="Brain chat" hotkey="g B" />
+          {forumEnabled() && <SidebarLink href="/forum" label="Forum" hotkey="g F" />}
           <div className="navDivider" />
           {terminalEnabled() && (
             <SidebarLink href="/terminal" label="Terminal" />
