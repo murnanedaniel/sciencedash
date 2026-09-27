@@ -53,7 +53,20 @@ type CallAgentOptions = {
 
 let cachedClaudePath: string | null | undefined;
 export async function resolveClaudePath(): Promise<string | null> {
-  if (cachedClaudePath !== undefined) return cachedClaudePath;
+  const { access, constants } = await import("node:fs/promises");
+
+  // Re-verify a cached path before trusting it. The binary can move or be
+  // uninstalled under a long-running server (on 2026-09-27 removing a
+  // duplicate npm install broke every AI feature until a restart). A null
+  // result is never cached for good either, so a later install is picked up.
+  if (cachedClaudePath) {
+    try {
+      await access(cachedClaudePath, constants.X_OK);
+      return cachedClaudePath;
+    } catch {
+      cachedClaudePath = undefined;
+    }
+  }
 
   // First: `which claude` — honours whatever PATH the process has.
   const whichOut = await new Promise<string | null>((resolve) => {
@@ -64,14 +77,18 @@ export async function resolveClaudePath(): Promise<string | null> {
     proc.on("close", () => resolve(buf.trim() ? buf.trim() : null));
   });
   if (whichOut) {
-    cachedClaudePath = whichOut;
-    return cachedClaudePath;
+    try {
+      await access(whichOut, constants.X_OK);
+      cachedClaudePath = whichOut;
+      return cachedClaudePath;
+    } catch {
+      // Stale PATH entry; fall through to the well-known locations.
+    }
   }
 
   // Fallback: probe well-known install locations when PATH is thin
   // (the in-process worker + HMR dev servers often don't inherit
   // ~/.local/bin from the user's interactive shell).
-  const { access, constants } = await import("node:fs/promises");
   const home = process.env.HOME ?? "";
   const candidates = [
     home ? `${home}/.local/bin/claude` : "",
@@ -88,7 +105,7 @@ export async function resolveClaudePath(): Promise<string | null> {
     }
   }
   cachedClaudePath = null;
-  return cachedClaudePath;
+  return null;
 }
 
 /* ---------------------- whitelist + truncation ---------------------- */
