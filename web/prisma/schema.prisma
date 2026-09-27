@@ -766,6 +766,10 @@ model ForumParticipant {
   /// Driver-side resume handle — SDK `session_id` / codex `thread_id`.
   /// Null until the participant has spoken once. Cleared by a resync.
   sessionRef String?
+  /// Cumulative cost reported by the driver for the current sessionRef.
+  /// Claude SDK's total_cost_usd is cumulative across a resumed session, so
+  /// each turn records only its own delta. Reset whenever the session is dropped.
+  sessionCostUsd Float @default(0)
 
   /// Round-robin order when no one is explicitly addressed.
   seat       Int         @default(0)
