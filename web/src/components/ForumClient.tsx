@@ -54,6 +54,12 @@ type ForumState = {
   attachmentsDir: string;
 };
 
+type UploadProgress = {
+  name: string;
+  current: number;
+  total: number;
+};
+
 type Props = { forumId: string };
 
 const SEAT_HUES = [215, 150, 32, 320];
@@ -85,7 +91,7 @@ export function ForumClient({ forumId }: Props) {
   const [errors, setErrors] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
-  const [uploading, setUploading] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<UploadProgress | null>(null);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -198,36 +204,48 @@ export function ForumClient({ forumId }: Props) {
     void post("message", { text });
   };
 
-  const uploadAttachment = async (file: File) => {
-    if (file.size > MAX_ATTACHMENT_SIZE) {
-      setErrors((prev) => [...prev.slice(-4), "Files must be under 10 MB"]);
-      return;
-    }
-
-    setUploading(file.name);
-    const body = new FormData();
-    body.append("file", file);
+  const uploadAttachments = async (files: File[]) => {
+    if (files.length === 0) return;
 
     try {
-      const res = await fetch(`/api/forum/${forumId}/attachments`, {
-        method: "POST",
-        body,
-      });
-      if (!res.ok) {
-        let message = `Upload failed (${res.status})`;
-        try {
-          const data = (await res.json()) as { error?: string };
-          if (data.error) message = data.error;
-        } catch {
-          // Keep the status-based fallback for a malformed error response.
+      // Keep requests sequential so transcript announcements preserve selection
+      // order and the server never buffers several 10 MB request bodies at once.
+      for (const [index, file] of files.entries()) {
+        setUploading({ name: file.name, current: index + 1, total: files.length });
+
+        if (file.size > MAX_ATTACHMENT_SIZE) {
+          setErrors((prev) => [
+            ...prev.slice(-4),
+            `${file.name} is over 10 MB — skipped`,
+          ]);
+          continue;
         }
-        setErrors((prev) => [...prev.slice(-4), message]);
+
+        const body = new FormData();
+        body.append("file", file);
+
+        try {
+          const res = await fetch(`/api/forum/${forumId}/attachments`, {
+            method: "POST",
+            body,
+          });
+          if (!res.ok) {
+            let message = `Upload failed (${res.status})`;
+            try {
+              const data = (await res.json()) as { error?: string };
+              if (data.error) message = data.error;
+            } catch {
+              // Keep the status-based fallback for a malformed error response.
+            }
+            setErrors((prev) => [...prev.slice(-4), message]);
+          }
+        } catch (err) {
+          setErrors((prev) => [
+            ...prev.slice(-4),
+            err instanceof Error ? err.message : String(err),
+          ]);
+        }
       }
-    } catch (err) {
-      setErrors((prev) => [
-        ...prev.slice(-4),
-        err instanceof Error ? err.message : String(err),
-      ]);
     } finally {
       setUploading(null);
     }
@@ -410,12 +428,13 @@ export function ForumClient({ forumId }: Props) {
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           hidden
           disabled={ended || uploading !== null}
           onChange={(e) => {
-            const file = e.target.files?.[0];
+            const files = Array.from(e.target.files ?? []);
             e.target.value = "";
-            if (file) void uploadAttachment(file);
+            if (files.length) void uploadAttachments(files);
           }}
         />
         <div
@@ -440,7 +459,9 @@ export function ForumClient({ forumId }: Props) {
             </button>
             <span className="muted small">
               {uploading
-                ? `Uploading ${uploading}…`
+                ? uploading.total === 1
+                  ? `Uploading ${uploading.name}…`
+                  : `Uploading ${uploading.current} of ${uploading.total}: ${uploading.name}…`
                 : running && speaking
                   ? `sending will interrupt @${speaking}`
                   : "your message resets the turn budget"}
