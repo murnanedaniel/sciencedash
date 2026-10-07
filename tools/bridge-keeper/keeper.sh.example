@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -eu
+export BRIDGE_DIR="${BRIDGE_DIR:-$HOME/sciencedash-bridge}"
+export BRIDGE_NAME=perlmutter
+mkdir -p "$BRIDGE_DIR"
+cd "$BRIDGE_DIR"
+# Slurm owns the background heartbeat as part of this job and kills it
+# when the job ends. exec preserves $$ as the rc bridge PID.
+"$BRIDGE_DIR/heartbeat.sh" &
+printf '%s\n' "$$" > "$BRIDGE_DIR/rc.pid"
+exec "$HOME/.local/bin/claude" rc --name perlmutter --permission-mode auto \
+  --debug-file "$BRIDGE_DIR/rc-debug.log" >/dev/null 2>&1

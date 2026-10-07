@@ -1,3 +1,4 @@
+import { runReconcile } from "@/lib/bridge/runReconcile";
 import { prisma } from "@/lib/prisma";
 import { withMutex } from "@/lib/worker/mutex";
 import { pullWandb } from "@/lib/ingest/wandb";
@@ -10,6 +11,7 @@ type Tick = {
   kind: JobKind;
   everyMs: number;
   run: () => Promise<Record<string, unknown>>;
+  quiet?: (payload: Record<string, unknown>) => boolean;
 };
 
 async function runTick(t: Tick) {
@@ -19,6 +21,10 @@ async function runTick(t: Tick) {
     });
     try {
       const payload = await t.run();
+      if (t.quiet?.(payload)) {
+        await prisma.jobRun.delete({ where: { id: job.id } });
+        return;
+      }
       await prisma.jobRun.update({
         where: { id: job.id },
         data: {
@@ -320,6 +326,12 @@ function parseTmuxAlive(configJson: string | null): boolean | null {
 }
 
 const TICKS: Tick[] = [
+  {
+    kind: "bridge_reconcile",
+    everyMs: 60_000,
+    run: runReconcile,
+    quiet: (payload) => Object.values(payload).every((count) => count === 0),
+  },
   {
     kind: "wandb_pull",
     everyMs: 30 * 60 * 1000,

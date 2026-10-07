@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 type Status = "alive" | "stale" | "down";
 type HostHealth = {
+  kind?: "bridge";
   host: string;
   status: Status;
   activeHost: string | null;
@@ -90,7 +91,7 @@ export function SyncHealthPill() {
       </div>
       {hosts.map((h) => (
         <div
-          key={h.host}
+          key={`${h.kind ?? "tmux"}:${h.host}`}
           title={
             h.lastHeartbeat
               ? `last beat: ${h.lastHeartbeat}\nworkhorses on host: ${h.workhorseCount}`
@@ -116,7 +117,7 @@ export function SyncHealthPill() {
             }}
           >
             <span style={{ fontSize: 11 }}>{DOT[h.status]}</span>
-            <span>{h.host}</span>
+            <span>{h.host}{h.kind === "bridge" ? " (rc)" : ""}</span>
             <span
               className="muted"
               style={{ marginLeft: "auto", fontSize: 10 }}
