@@ -121,7 +121,7 @@ Extend `GET /api/health/hosts` to also return one entry per `Bridge`: `host = na
 - **`README.md`:** install steps, and the scrontab line `#SCRON -q cron -A <acct> -t 24:00:00 --time-min=00:30:00 -J perlmutter-rc` with `*/5 * * * *`. Explain how to stop it: `scrontab -r` plus SIGTERM to rc; never plain `scancel`.
 
 ## 7. Tests and CI
-- Add `vitest` as a devDependency, a `"test": "vitest run"` script, and `web/src/lib/bridge/reconcile.test.ts` covering every rule in 3a. That's at least: fresh/stale/down thresholds, env changed → recreate (and its dedupe), live → mark_live, orphaned → wake, backoff respected, `wakeCount >= 8` → recreate, down 30 min → alert once, recovery → clear, inactive skipped, `sameSession("session_01X","cse_01X") === true`.
+- **No new dependencies.** Use Node's built-in runner: add the script `"test": "node --import tsx --test 'src/**/*.test.ts'"` (`tsx` is already a dependency) and write `web/src/lib/bridge/reconcile.test.ts` with `node:test` and `node:assert/strict`, covering every rule in 3a. Keep `reconcile.ts` free of `@/` path-alias imports so it runs under plain tsx. That's at least: fresh/stale/down thresholds, env changed → recreate (and its dedupe), live → mark_live, orphaned → wake, backoff respected, `wakeCount >= 8` → recreate, down 30 min → alert once, recovery → clear, inactive skipped, `sameSession("session_01X","cse_01X") === true`.
 - Add a `npm test` step to `.github/workflows/ci.yml` after `tsc`.
 - These must pass: `npx tsc --noEmit`, `npm test`, `npx prisma validate`, and `npx prisma migrate diff` (the migration matches the schema).
 
