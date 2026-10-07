@@ -24,20 +24,19 @@ export function ChatWithProjectButton({
   const [isPending, startTransition] = useTransition();
   const [persistResult, setPersistResult] = useState<string | null>(null);
 
-  const sessionName = `sd-${projectId.slice(0, 8)}`;
   // Build the inner claude invocation. Tools reach ScienceDash through the
   // installed `sciencedash` skill (the ambient bootstrap puts it on every
   // machine) — no per-project .mcp.json needed. We append a one-line primer
   // so Claude knows "this project" means the ScienceDash project (not the
   // git repo) and reaches state via the skill. Keep the primer quote-free
-  // so it nests safely inside the single-quoted tmux command.
+  // for the local shell invocation.
   const primer =
     `This is ScienceDash project ${projectId}. For project state (runs, ` +
     `hypotheses, decisions, literature, agent messages) use the sciencedash ` +
     `skill rather than inferring from git history. Pass projectId=${projectId} to its tools.`;
   const claudeArgs = localPath ? `--append-system-prompt "${primer}"` : "";
-  const tmuxCmd = localPath
-    ? `tmux new -As ${sessionName} 'cd ${shellQuote(localPath)} && (claude --continue ${claudeArgs} 2>/dev/null || claude ${claudeArgs})'`
+  const chatCmd = localPath
+    ? `cd ${shellQuote(localPath)} && (claude --continue ${claudeArgs} 2>/dev/null || claude ${claudeArgs})`
     : "";
 
   const ready = !!localPath;
@@ -51,7 +50,7 @@ export function ChatWithProjectButton({
         onClick={() => setOpen((v) => !v)}
         title={
           ready
-            ? "Show the tmux command to chat with this project"
+            ? "Show the command to chat with this project"
             : "Set a local repo path first"
         }
       >
@@ -153,15 +152,10 @@ export function ChatWithProjectButton({
               margin: 0,
             }}
           >
-            {tmuxCmd}
+            {chatCmd}
           </pre>
           <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <CopyButton value={tmuxCmd} label="Copy command" variant="primary" />
-            <CopyButton
-              value={`tmux attach -t ${sessionName}`}
-              label="Copy attach"
-              title="Copy: tmux attach -t … — for re-attaching to an already-running session"
-            />
+            <CopyButton value={chatCmd} label="Copy command" variant="primary" />
           </div>
         </div>
       ) : null}

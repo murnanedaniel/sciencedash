@@ -152,7 +152,7 @@ enum AgentMessageKind {
   alert
   status
   digest
-  /// Command from the dashboard to a workhorse (e.g. revive_session).
+  /// Workhorse recreation request (recreate_rc_workhorse).
   /// Body is short; payloadJson holds the structured directive.
   directive
 }
@@ -566,36 +566,23 @@ model Bridge {
 }
 
 model Workhorse {
-  id              String   @id @default(cuid())
-  createdAt       DateTime @default(now())
-
-  projectId       String
-  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  /// Hostname or stable workhorse identifier ("perlmutter", "vast-h100-3", etc.).
-  host            String
-  /// tmux session name on the host. Convention: `sd-<projectId-prefix>`.
-  sessionName     String
-
-  /// Last beat from the cron-driven sync daemon. Indicates `host_reachable`.
-  lastHeartbeat   DateTime?
-  /// Last beat from a Claude tool call. Indicates `claude_active`.
-  lastClaudeBeat  DateTime?
-
-  /// Workhorse-side config snapshot (JSON). Helpful for debugging.
-  configJson      String?
-
-  transport           String    @default("tmux")
-  bridgeName          String?
-  rcSessionId         String?
+  id                  String    @id @default(cuid())
+  createdAt           DateTime  @default(now())
+  projectId           String
+  project             Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bridgeName          String
+  rcSessionId         String
   rcEnvId             String?
-  rcState             String?
+  rcState             String?   // "live" | "waking" | "needs_recreate" | "stopped"
+  registeredAt        DateTime?
   lastWakeAt          DateTime?
   wakeCount           Int       @default(0)
   recreateRequestedAt DateTime?
+  lastTickAt          DateTime?
+  repo                String?
 
-  @@unique([host, sessionName])
-  @@index([host])
+  @@unique([projectId, bridgeName])
+  @@index([bridgeName])
   @@index([projectId])
 }
 

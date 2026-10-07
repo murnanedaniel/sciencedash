@@ -34,7 +34,7 @@ const MAP = [
     src: "workhorse-protocol.md",
     out: "workhorse-protocol.md",
     title: "Workhorse protocol",
-    description: "The sync.py wire protocol between dashboard and host.",
+    description: "Remote Control bridge heartbeats, recovery and workhorse ticks.",
   },
 ];
 

@@ -22,7 +22,7 @@ system prompt, so changes show up on the next message — no restart required.
 (Edit this as your fleet grows. The chat references it when deciding where to
 dispatch a workhorse.)
 
-- **<host-name>** — (notes: is sync.py alive? where do project repos live? how
+- **<host-name>** — (notes: is the RC bridge fresh? where do project repos live? how
   are GPU jobs dispatched? any "don't spawn here" rules?)
 
 ## Current priorities

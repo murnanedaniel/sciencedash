@@ -45,7 +45,7 @@ The centre of gravity shifted from "a dashboard" to "a dashboard that commands
 remote compute":
 
 - **Workhorse platform v1** (`#7`, `+9,669` in one PR) — cluster integration, an
-  MCP write surface, and the `sync.py` supervisor. A second app's worth of code
+  MCP write surface, and the original host supervisor (since retired). A second app's worth of code
   in a single commit: dispatch Claude Code sessions onto remote hosts and watch
   them from the sidebar.
 - **Autonomy loops** (`#8`) — a brain heartbeat scheduler + workhorse tick.
@@ -66,11 +66,11 @@ in this stretch is a reliability patch on the remote-agent loop:
 
 - `#30` — drop an `insensitive` search mode SQLite doesn't support (the database
   ceiling biting).
-- `#31` — `start_session` directive + a bulk kill switch.
+- `#31` — session-launch directive + a bulk kill switch.
 - `#32` — a web-native chat surface at `/chat` (`+980`).
 - `#33` — **self-healing dispatch** + surfacing post-delivery failures.
 - `#34` — launch Claude with `--dangerously-skip-permissions` for unattended runs.
-- `#35` — a **`sync.py` health pill** per remote host in the sidebar.
+- `#35` — a **host-supervisor health pill** per remote host in the sidebar.
 
 That last one is telling: by the end, the thing most worth building was *visibility
 into whether the remote agents were even alive*. The workhorse fleet was the most

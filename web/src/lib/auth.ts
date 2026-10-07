@@ -3,7 +3,7 @@
  * anywhere else that needs to verify a request.
  *
  * Two trust paths:
- *   1. Bearer token (machines: sync.py, workhorse Claude MCP calls).
+ *   1. Bearer token (machines: bridges, ambient transcript shipping, sd.py).
  *      Literal compare against `SCIENCEDASH_AUTH_TOKEN`.
  *   2. Signed session cookie (browsers). HMAC-SHA256 over
  *      "<userId>.<expiresAt>" with `SCIENCEDASH_SESSION_SECRET`.

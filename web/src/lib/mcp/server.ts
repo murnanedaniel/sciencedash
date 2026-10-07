@@ -3,9 +3,8 @@
  *
  * `callTool(name, args)` dispatches to one of the registered handlers and
  * returns a `ToolResult` (= MCP CallToolResult shape). Consumers reach it
- * three ways, all in-process: the REST gateway (/api/tool/[name]), the
- * in-process SDK tool server (sdkServer.ts), and the workhorse sync
- * endpoints. The old JSON-RPC-over-HTTP transport has been retired.
+ * through the REST gateway (/api/tool/[name]) and the in-process SDK
+ * tool server (sdkServer.ts). The old JSON-RPC-over-HTTP transport has been retired.
  *
  * Tools are registered by importing their group modules; this keeps the
  * surface auditable (every tool is a static reference, not a runtime registration).

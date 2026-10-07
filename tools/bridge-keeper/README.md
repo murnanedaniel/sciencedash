@@ -10,7 +10,7 @@
 3. Configure `~/.sciencedash/config.json` with `"dashboard_url": "https://<dashboard>"`
    and `~/.sciencedash/auth.env` with `SCIENCEDASH_AUTH_TOKEN='<token>'`.
    Restrict the token file with `chmod 600 ~/.sciencedash/auth.env`.
-   Existing sync.py files can be reused unchanged. Environment variables
+   Existing dashboard configuration and token files can be reused unchanged. Environment variables
    `SCIENCEDASH_URL` and `SCIENCEDASH_AUTH_TOKEN` override file values.
 4. Run `scrontab -e` and install the following (replace `<acct>` and the absolute path):
 

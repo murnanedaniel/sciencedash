@@ -119,7 +119,7 @@ async function stallDetect(): Promise<Record<string, unknown>> {
  * only fires when its own preconditions hold.
  */
 export const DEFAULT_BRAIN_INTERVAL_SEC = 12 * 3600;
-export const DEFAULT_WORKHORSE_INTERVAL_SEC = 1 * 3600;
+export { DEFAULT_WORKHORSE_INTERVAL_SEC } from "@/lib/bridge/workhorseState";
 
 /**
  * Brain tick — gated by per-project autonomy AND per-project tempo.
@@ -211,118 +211,16 @@ async function brainTick(): Promise<Record<string, unknown>> {
   };
 }
 
-/**
- * Workhorse tick — queue a `workhorse_tick` directive per alive workhorse,
- * gated by autonomy AND per-project tempo.
- *
- * Skip reasons:
- *   - autonomy bucket for `workhorse_tick` is not `auto`
- *   - `Project.workhorseIntervalSec === 0` (paused)
- *   - workhorse `tmuxAlive=false` (no session to nudge)
- *   - `lastClaudeBeat` within last 5 min (Claude likely mid-turn)
- *   - last `workhorse_tick` directive on this (host, sessionName) channel
- *     was queued less than `workhorseIntervalSec` ago
- *   - an unread `workhorse_tick` is already pending (dedup)
- */
+/** RC ticks retain the global thirty-minute schedule and per-project gates. */
 async function workhorseTickAll(): Promise<Record<string, unknown>> {
-  const projects = await prisma.project.findMany({
-    where: { status: "active" },
-    select: { id: true, title: true, workhorseIntervalSec: true },
-  });
-  let queued = 0;
-  let skippedNoAutonomy = 0;
-  let skippedPaused = 0;
-  let skippedNotAlive = 0;
-  let skippedRecentBeat = 0;
-  let skippedAlreadyPending = 0;
-  let skippedTempo = 0;
+  const { tickProjectWorkhorses, emptyTickCounts } = await import("@/lib/bridge/tick");
+  const projects = await prisma.project.findMany({ where: { status: "active" }, select: { id: true } });
+  const counts = emptyTickCounts();
   for (const p of projects) {
-    const decision = await decideAutonomy(p.id, "workhorse_tick");
-    if (decision !== "auto") {
-      skippedNoAutonomy += 1;
-      continue;
-    }
-    const intervalSec = p.workhorseIntervalSec ?? DEFAULT_WORKHORSE_INTERVAL_SEC;
-    if (intervalSec <= 0) {
-      skippedPaused += 1;
-      continue;
-    }
-    const workhorses = await prisma.workhorse.findMany({
-      where: { projectId: p.id },
-      select: {
-        id: true,
-        host: true,
-        sessionName: true,
-        configJson: true,
-        lastClaudeBeat: true,
-      },
-    });
-    for (const w of workhorses) {
-      const tmuxAlive = parseTmuxAlive(w.configJson);
-      if (tmuxAlive !== true) {
-        skippedNotAlive += 1;
-        continue;
-      }
-      const beat = w.lastClaudeBeat?.getTime() ?? 0;
-      if (beat && Date.now() - beat < 5 * 60_000) {
-        skippedRecentBeat += 1;
-        continue;
-      }
-      const source = `dashboard@${w.host}:${w.sessionName}`;
-      // Most-recent tick directive on this channel — drives both dedup
-      // (unread → already pending) and tempo (recently queued → wait).
-      const lastTick = await prisma.agentMessage.findFirst({
-        where: {
-          projectId: p.id,
-          kind: "directive",
-          source,
-          body: "workhorse_tick",
-        },
-        orderBy: { createdAt: "desc" },
-        select: { createdAt: true, readAt: true },
-      });
-      if (lastTick) {
-        if (!lastTick.readAt) {
-          skippedAlreadyPending += 1;
-          continue;
-        }
-        if (Date.now() - lastTick.createdAt.getTime() < intervalSec * 1000) {
-          skippedTempo += 1;
-          continue;
-        }
-      }
-      await prisma.agentMessage.create({
-        data: {
-          projectId: p.id,
-          kind: "directive",
-          severity: "info",
-          source,
-          body: "workhorse_tick",
-          payloadJson: null, // sync.py uses the default tick prompt
-        },
-      });
-      queued += 1;
-    }
+    const result = await tickProjectWorkhorses(p.id);
+    for (const key of Object.keys(counts) as Array<keyof typeof counts>) counts[key] += result[key];
   }
-  return {
-    queued,
-    skippedNoAutonomy,
-    skippedPaused,
-    skippedNotAlive,
-    skippedRecentBeat,
-    skippedAlreadyPending,
-    skippedTempo,
-  };
-}
-
-function parseTmuxAlive(configJson: string | null): boolean | null {
-  if (!configJson) return null;
-  try {
-    const c = JSON.parse(configJson) as { tmuxAlive?: unknown };
-    return c.tmuxAlive === true ? true : c.tmuxAlive === false ? false : null;
-  } catch {
-    return null;
-  }
+  return counts;
 }
 
 const TICKS: Tick[] = [

@@ -11,9 +11,10 @@ export type WorkhorseView = {
   projectTitle: string;
   active: boolean;
   bridgeName: string;
-  rcSessionId: string | null;
+  rcSessionId: string;
   rcEnvId: string | null;
   rcState: string | null;
+  registeredAt: Date | null;
   lastWakeAt: Date | null;
   wakeCount: number;
   recreateRequestedAt: Date | null;
@@ -54,9 +55,12 @@ export function decideReconcile(
     }
   }
   for (const w of workhorses) {
-    if (!w.active || !w.bridgeName || !w.rcSessionId) continue;
+    if (w.rcState === "stopped" || !w.active || !w.bridgeName || !w.rcSessionId) continue;
     const b = byName.get(w.bridgeName);
     if (!b || bridgeStatus(b, now) !== "fresh") continue;
+    const isLive = b.liveSessions.some((s) => sameSession(s, w.rcSessionId));
+    // Allow heartbeats time to discover a newly registered or resumed session.
+    if (!isLive && w.registeredAt && now.getTime() - w.registeredAt.getTime() < 3 * MINUTE) continue;
     const recreate = (reason: string) => {
       if (!w.recreateRequestedAt || now.getTime() - w.recreateRequestedAt.getTime() > 6 * 60 * MINUTE) {
         actions.push({ type: "request_recreate", workhorseId: w.id, reason });
@@ -64,7 +68,7 @@ export function decideReconcile(
     };
     if (b.envId !== w.rcEnvId) {
       recreate(`env changed ${w.rcEnvId}→${b.envId}`);
-    } else if (b.liveSessions.some((s) => sameSession(s, w.rcSessionId!))) {
+    } else if (isLive) {
       if (w.rcState !== "live" || w.wakeCount > 0) {
         actions.push({ type: "mark_live", workhorseId: w.id });
       }
