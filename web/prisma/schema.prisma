@@ -125,6 +125,7 @@ enum JobKind {
   project_brain
   project_brain_global
   workhorse_tick_global
+  bridge_reconcile
   other
 }
 
@@ -139,6 +140,7 @@ enum PromptKind {
 }
 
 enum AgentMessageSeverity {
+  warn
   info
   suggestion
   decision
@@ -547,6 +549,22 @@ model CheckIn {
   proposedPatchJson   String?
 }
 
+model Bridge {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  name          String   @unique
+  envId         String?
+  node          String?
+  jobId         String?
+  rcAlive       Boolean  @default(false)
+  claudeVersion String?
+  liveSessions  String   @default("[]")
+  lastBeat      DateTime?
+  downAlertedAt DateTime?
+  configJson    String?
+}
+
 model Workhorse {
   id              String   @id @default(cuid())
   createdAt       DateTime @default(now())
@@ -566,6 +584,15 @@ model Workhorse {
 
   /// Workhorse-side config snapshot (JSON). Helpful for debugging.
   configJson      String?
+
+  transport           String    @default("tmux")
+  bridgeName          String?
+  rcSessionId         String?
+  rcEnvId             String?
+  rcState             String?
+  lastWakeAt          DateTime?
+  wakeCount           Int       @default(0)
+  recreateRequestedAt DateTime?
 
   @@unique([host, sessionName])
   @@index([host])

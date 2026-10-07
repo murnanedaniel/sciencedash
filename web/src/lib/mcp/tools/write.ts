@@ -316,7 +316,7 @@ const moveRunToHypothesis: ToolDefinition = {
 };
 
 const AGENT_MESSAGE_KIND = ["note", "alert", "status", "digest"] as const;
-const AGENT_MESSAGE_SEVERITY = ["info", "suggestion", "decision", "blocker"] as const;
+const AGENT_MESSAGE_SEVERITY = ["warn", "info", "suggestion", "decision", "blocker"] as const;
 
 const postMessage: ToolDefinition = {
   name: "post_message",
@@ -1401,7 +1401,52 @@ const refreshRepo: ToolDefinition = {
   },
 };
 
+const registerRcWorkhorse: ToolDefinition = {
+  name: "register_rc_workhorse",
+  description: "Register an existing Claude Remote Control workhorse and acknowledge pending recreation requests for its project.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      projectId: { type: "string" },
+      bridgeName: { type: "string" },
+      rcSessionId: { type: "string" },
+      rcEnvId: { type: "string" },
+      repo: { type: "string" },
+    },
+    required: ["projectId", "bridgeName", "rcSessionId", "rcEnvId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = requireString(args, "projectId");
+    const bridgeName = requireString(args, "bridgeName");
+    const rcSessionId = requireString(args, "rcSessionId");
+    const rcEnvId = requireString(args, "rcEnvId");
+    const repo = optString(args, "repo");
+    if (!/^[a-z0-9-]{1,40}$/.test(bridgeName)) throw new Error("invalid bridgeName");
+    const sessionName = "rc-" + projectId.slice(0, 10);
+    const data = {
+      projectId, transport: "rc", bridgeName, rcSessionId, rcEnvId,
+      rcState: "live", wakeCount: 0, recreateRequestedAt: null, lastWakeAt: null,
+      ...(repo ? { configJson: JSON.stringify({ repo }) } : {}),
+    };
+    const workhorse = await prisma.$transaction(async (tx) => {
+      const row = await tx.workhorse.upsert({
+        where: { host_sessionName: { host: bridgeName, sessionName } },
+        create: { host: bridgeName, sessionName, ...data },
+        update: data,
+      });
+      await tx.agentMessage.updateMany({
+        where: { projectId, kind: "directive", body: "recreate_rc_workhorse", readAt: null },
+        data: { readAt: new Date() },
+      });
+      return row;
+    });
+    return jsonResult(workhorse);
+  },
+};
+
 export const writeTools: ToolDefinition[] = [
+  registerRcWorkhorse,
   createCheckIn,
   recordDecision,
   addNote,

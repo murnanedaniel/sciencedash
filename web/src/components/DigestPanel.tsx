@@ -18,6 +18,7 @@ import { GlobalHeartbeatButton } from "@/components/GlobalHeartbeatButton";
 
 const SEVERITY_RANK: Record<string, number> = {
   blocker: 4,
+  warn: 3.5,
   decision: 3,
   suggestion: 2,
   info: 1,
@@ -30,7 +31,10 @@ export async function DigestPanel() {
   const recent = await prisma.agentMessage.findMany({
     where: {
       readAt: null,
-      project: { status: { in: ["active", "blocked"] } },
+      OR: [
+        { project: { status: { in: ["active", "blocked"] } } },
+        { projectId: "sciencedash-system" },
+      ],
     },
     orderBy: { createdAt: "desc" },
     take: 50,
@@ -85,7 +89,7 @@ export async function DigestPanel() {
               ? "var(--red, #c0322a)"
               : m.severity === "decision"
                 ? "var(--accent, #6a4cd6)"
-                : m.severity === "suggestion"
+                : m.severity === "suggestion" || m.severity === "warn"
                   ? "var(--accent2, #b08a3a)"
                   : "var(--muted, #888)";
           return (

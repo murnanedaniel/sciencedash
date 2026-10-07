@@ -874,7 +874,7 @@ async function FeedTab({ projectId }: { projectId: string }) {
             ? "var(--red, #c0322a)"
             : m.severity === "decision"
               ? "var(--accent, #6a4cd6)"
-              : m.severity === "suggestion"
+              : m.severity === "suggestion" || m.severity === "warn"
                 ? "var(--accent2, #b08a3a)"
                 : "var(--muted, #888)";
         return (
