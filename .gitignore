@@ -13,3 +13,7 @@ __pycache__/
 
 # stray sqlite at repo root (the real one lives at web/dev.db)
 /dev.db
+
+# alternating production build slots
+/web/.next-a/
+/web/.next-b/
