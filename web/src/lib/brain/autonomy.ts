@@ -20,11 +20,6 @@ export const KNOWN_ACTION_CLASSES: Array<{
   riskLevel: "low" | "medium" | "high";
 }> = [
   {
-    name: "revive_session",
-    description: "Restart a workhorse's tmux Claude session when the host's reaper has killed it.",
-    riskLevel: "low",
-  },
-  {
     name: "restart_run",
     description: "Re-launch a failed/OOMed W&B run with the same or adjusted config.",
     riskLevel: "low",
@@ -70,11 +65,8 @@ export const KNOWN_ACTION_CLASSES: Array<{
       "Run the project brain on a schedule. ask=manual click only, propose=post messages/notes/check-ins, auto=full write surface.",
     riskLevel: "medium",
   },
-  // Workhorse tick (Part 2). sync.py reads workhorse_tick directives and
-  // injects a prompt into the workhorse Claude via tmux send-keys when
-  // the session is idle. auto=scheduler queues directives every 30 min;
-  // propose=identical to auto for now (retained for future "post a heads-
-  // up before nudging" UX); ask=scheduler skips this project.
+  // Scheduled RC ticks require auto. Explicit dispatch also permits propose;
+  // ask posts a permission alert without sending a tick.
   {
     name: "workhorse_tick",
     description:

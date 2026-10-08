@@ -1,3 +1,4 @@
+import { deriveWorkhorseState } from "@/lib/bridge/workhorseState";
 /**
  * Read tools — non-mutating queries against the ScienceDash DB.
  *
@@ -308,32 +309,17 @@ const queryEntity: ToolDefinition = {
         return jsonResult(messages);
       }
       case "workhorse": {
-        const workhorses = await prisma.workhorse.findMany({
-          where: { ...(projectId ? { projectId } : {}) },
-          orderBy: [{ projectId: "asc" }, { host: "asc" }],
-          take: limit,
-        });
-        const now = Date.now();
-        return jsonResult(
-          workhorses.map((w) => {
-            const tmuxAlive = parseTmuxAlive(w.configJson);
-            return {
-              id: w.id,
-              projectId: w.projectId,
-              host: w.host,
-              sessionName: w.sessionName,
-              lastHeartbeat: w.lastHeartbeat,
-              lastClaudeBeat: w.lastClaudeBeat,
-              tmuxAlive,
-              state: deriveWorkhorseState(
-                now,
-                w.lastHeartbeat,
-                w.lastClaudeBeat,
-                tmuxAlive,
-              ),
-            };
+        const [workhorses, bridges] = await Promise.all([
+          prisma.workhorse.findMany({
+            where: { ...(projectId ? { projectId } : {}) },
+            orderBy: [{ projectId: "asc" }, { bridgeName: "asc" }], take: limit,
           }),
-        );
+          prisma.bridge.findMany(),
+        ]);
+        const byName = new Map(bridges.map((b) => [b.name, { ...b, liveSessions: [] }]));
+        return jsonResult(workhorses.map((w) => ({
+          ...w, state: deriveWorkhorseState(w.rcState, byName.get(w.bridgeName), new Date()),
+        })));
       }
       case "brain_chat": {
         const chats = await prisma.brainChat.findMany({
@@ -681,16 +667,10 @@ const getEntity: ToolDefinition = {
       case "workhorse": {
         const w = await prisma.workhorse.findUnique({ where: { id } });
         if (!w) throw new Error(`workhorse not found: ${id}`);
-        const tmuxAlive = parseTmuxAlive(w.configJson);
+        const bridge = await prisma.bridge.findUnique({ where: { name: w.bridgeName } });
         return jsonResult({
           ...w,
-          tmuxAlive,
-          state: deriveWorkhorseState(
-            Date.now(),
-            w.lastHeartbeat,
-            w.lastClaudeBeat,
-            tmuxAlive,
-          ),
+          state: deriveWorkhorseState(w.rcState, bridge ? { ...bridge, liveSessions: [] } : undefined, new Date()),
         });
       }
       case "brain_chat": {
@@ -750,48 +730,5 @@ const getEntity: ToolDefinition = {
     throw new Error(`unhandled kind: ${kind as string}`);
   },
 };
-
-/* ---------------------- workhorse-state helpers --------------------- */
-
-function parseTmuxAlive(configJson: string | null): boolean | null {
-  if (!configJson) return null;
-  try {
-    const parsed = JSON.parse(configJson) as { tmuxAlive?: unknown };
-    return parsed.tmuxAlive === true
-      ? true
-      : parsed.tmuxAlive === false
-        ? false
-        : null;
-  } catch {
-    return null;
-  }
-}
-
-function deriveWorkhorseState(
-  now: number,
-  lastHeartbeat: Date | null,
-  lastClaudeBeat: Date | null,
-  tmuxAlive: boolean | null,
-): "alive" | "idle" | "dead" | "unreachable" {
-  const hb = lastHeartbeat?.getTime() ?? 0;
-  const cb = lastClaudeBeat?.getTime() ?? 0;
-  const HOST_STALE_MS = 3 * 60_000;
-  const CLAUDE_IDLE_MS = 30 * 60_000;
-
-  const hostAlive = hb && now - hb < HOST_STALE_MS;
-  if (!hostAlive) return "unreachable";
-
-  if (tmuxAlive === false) return "dead";
-  if (tmuxAlive === true) {
-    if (cb > 0 && now - cb > CLAUDE_IDLE_MS) return "idle";
-    return "alive";
-  }
-
-  if (!cb) return "dead";
-  const claudeAge = now - cb;
-  if (claudeAge < 5 * 60_000) return "alive";
-  if (claudeAge < CLAUDE_IDLE_MS) return "idle";
-  return "dead";
-}
 
 export const readTools: ToolDefinition[] = [queryEntity, getEntity];

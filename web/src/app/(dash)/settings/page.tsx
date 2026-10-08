@@ -77,12 +77,11 @@ export default async function SettingsPage() {
 
   // For the "Stop all workhorses" kill switch in the fleet panel.
   const workhorseFleet = await prisma.workhorse.findMany({
-    orderBy: [{ host: "asc" }, { sessionName: "asc" }],
+    orderBy: [{ bridgeName: "asc" }, { projectId: "asc" }],
     select: {
       id: true,
-      host: true,
-      sessionName: true,
-      lastHeartbeat: true,
+      bridgeName: true,
+      rcState: true,
       projectId: true,
     },
   });
@@ -241,66 +240,18 @@ export default async function SettingsPage() {
           </p>
         </div>
 
-        {/* Cluster integration */}
         <div className="card">
-          <h2 className="sectionTitle">Cluster Claude integration</h2>
-          <p className="muted small" style={{ marginTop: 0 }}>
-            Hook a long-running Claude Code session on a remote host (Perlmutter, Vast, …) into ScienceDash via the workhorse sync protocol.
-          </p>
-          <ol className="stack small" style={{ paddingLeft: 18, gap: 10 }}>
-            <li>
-              <div>
-                <strong>One-time:</strong> install <code>cloudflared</code> on the laptop (Linux/WSL2):
-              </div>
-              <ClusterCmd cmd="curl -L --output /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && sudo dpkg -i /tmp/cloudflared.deb" />
-            </li>
-            <li>
-              <div>
-                Open a fresh laptop terminal and start a quick-tunnel — keep it running for the whole work session:
-              </div>
-              <ClusterCmd cmd="cloudflared tunnel --url http://localhost:3000" />
-              <div className="muted small" style={{ marginTop: 4 }}>
-                Copy the printed <code>https://*.trycloudflare.com</code> URL — that&apos;s your dashboard URL for the cluster side.
-              </div>
-            </li>
-            <li>
-              <div>SSH into the cluster:</div>
-              <ClusterCmd cmd="ssh user@host" />
-            </li>
-            <li>
-              <div>Copy the bootstrap files to the cluster:</div>
-              <ClusterCmd cmd="scp tools/workhorse-bootstrap/sync.py tools/workhorse-bootstrap/setup.sh user@host:~/.sciencedash-bootstrap/" />
-            </li>
-            <li>
-              <div>Run the bootstrap on the cluster (paste the cloudflared URL):</div>
-              <ClusterCmd cmd="DASHBOARD=https://<your-cloudflared-url> HOST=<host> bash ~/.sciencedash-bootstrap/setup.sh" />
-            </li>
-            <li>
-              Edit <code>~/.sciencedash/config.json</code> to register projects (set <code>dashboard_url</code> to the same cloudflared URL), then re-run setup.sh (it&apos;s idempotent and writes each project&apos;s <code>CHAT_CONTEXT.md</code> primer).
-            </li>
-            <li>
-              <div>Start the Claude session inside tmux (tools reach ScienceDash through the installed <code>sciencedash</code> skill):</div>
-              <ClusterCmd cmd="tmux new -As sd-<projectId> &quot;cd <repo> && claude --append-system-prompt \&quot;$(cat ~/.sciencedash/<projectId>/CHAT_CONTEXT.md)\&quot;&quot;" />
-            </li>
-            <li>
-              <div>Re-attach later (optional):</div>
-              <ClusterCmd cmd="tmux attach -t sd-<projectId>" />
-            </li>
-          </ol>
-          <p className="muted small" style={{ marginTop: 8 }}>
-            Full guide: <Link className="link" href="/docs/setup">/docs/setup</Link>{" "}
-            (cloudflared + SSH-tunnel alternative). Wire protocol:{" "}
-            <code>docs/workhorse-protocol.md</code>.
-          </p>
+          <h2 className="sectionTitle">Remote Control bridges</h2>
+          <p className="muted small">Install the keeper using <code>tools/bridge-keeper/README.md</code>.
+            Start a session on the <code>perlmutter</code> bridge, then call <code>register_rc_workhorse</code>.</p>
+          <Link className="link" href="/docs/setup">Setup guide</Link>
         </div>
 
         {/* Workhorse fleet — currently registered + kill switch. */}
         <div className="card">
           <h2 className="sectionTitle">Workhorse fleet</h2>
           <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
-            Live workhorses across every registered host. The chat surface
-            auto-fires <code>dispatch_workhorse_session</code> — this is the
-            kill switch that takes everything back in one click.
+            Registered RC workhorses across every bridge. Stop pauses automated wakes and ticks; running Claude turns may finish.
           </p>
           {workhorseFleet.length === 0 ? (
             <p className="muted small" style={{ marginTop: 0 }}>
@@ -319,7 +270,7 @@ export default async function SettingsPage() {
                 >
                   <span>
                     <code style={{ fontSize: 12 }}>
-                      {w.host}:{w.sessionName}
+                      {w.bridgeName}
                     </code>{" "}
                     <Link
                       className="link small muted"
@@ -329,9 +280,7 @@ export default async function SettingsPage() {
                     </Link>
                   </span>
                   <span className="muted small">
-                    {w.lastHeartbeat
-                      ? daysAgoLabel(w.lastHeartbeat)
-                      : "no beats yet"}
+                    {w.rcState ?? "unknown"}
                   </span>
                 </li>
               ))}

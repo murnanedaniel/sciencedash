@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  *   bash <(curl -fsSL -H "Authorization: Bearer $TOK" \
  *     "https://your-dashboard-host.example.com/api/ambient-bootstrap/launch")
  *
- * Mirrors /api/workhorse-bootstrap/launch: the bearer token is mirrored from
+ * The bearer token is mirrored from
  * the curl header into ~/.sciencedash/auth.env, and the shipper / skill / hook
  * files are read from the repo at request time so the bash always ships the
  * version the dashboard is running. Installs: the transcript shipper + 1-min

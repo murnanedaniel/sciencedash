@@ -8,7 +8,7 @@ const bridge: BridgeView = { name: "perlmutter", envId: "env_1", lastBeat: now, 
 const wh: WorkhorseView = {
   id: "w1", projectId: "p1", projectTitle: "Research", active: true,
   bridgeName: bridge.name, rcSessionId: "session_01X", rcEnvId: "env_1",
-  rcState: "orphaned", lastWakeAt: null, wakeCount: 0, recreateRequestedAt: null,
+  rcState: "orphaned", registeredAt: null, lastWakeAt: null, wakeCount: 0, recreateRequestedAt: null,
 };
 const decide = (b: Partial<BridgeView> = {}, w: Partial<WorkhorseView> = {}) =>
   decideReconcile([{ ...bridge, ...b }], [{ ...wh, ...w }], now);
@@ -75,7 +75,7 @@ test("fresh recovery clears the alert; stale does not", () => {
   assert.deepEqual(decide({ lastBeat: ago(3), downAlertedAt: ago(30) }), []);
 });
 test("inactive or unregistered workhorses are skipped", () => {
-  for (const w of [{ active: false }, { bridgeName: "" }, { rcSessionId: null }, { bridgeName: "missing" }]) {
+  for (const w of [{ active: false }, { bridgeName: "" }, { bridgeName: "missing" }]) {
     assert.deepEqual(decide({}, w), []);
   }
 });
@@ -89,4 +89,28 @@ test("not-fresh bridges suppress every workhorse action", () => {
 test("sessions are matched only on their own bridge", () => {
   assert.deepEqual(decideReconcile([bridge, { ...bridge, name: "other", liveSessions: ["cse_01X"] }], [wh], now), wake);
   assert.deepEqual(decideReconcile([], [wh], now), []);
+});
+
+test("stopped workhorses never produce workhorse actions", () => {
+  for (const b of [{}, { envId: "env_new" }, { liveSessions: ["cse_01X"] }]) {
+    assert.deepEqual(decide(b, { rcState: "stopped", wakeCount: 8 }), []);
+  }
+});
+
+test("registration grace suppresses wakes and recreation for absent sessions", () => {
+  for (const age of [0, 20 / 60, 2.999]) {
+    const registeredAt = ago(age);
+    assert.deepEqual(decide({}, { registeredAt }), []);
+    assert.deepEqual(decide({}, { registeredAt, wakeCount: 8 }), []);
+    assert.deepEqual(decide({ envId: "env_2" }, { registeredAt }), []);
+  }
+});
+test("registration grace expires at three minutes", () => {
+  for (const age of [3, 3.001, 10]) {
+    assert.deepEqual(decide({}, { registeredAt: ago(age) }), wake);
+  }
+});
+test("registration grace does not suppress marking live sessions", () => {
+  assert.deepEqual(decide({ liveSessions: ["cse_01X"] }, { registeredAt: ago(20 / 60), wakeCount: 1 }),
+    [{ type: "mark_live", workhorseId: wh.id }]);
 });

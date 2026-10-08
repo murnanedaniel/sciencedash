@@ -380,146 +380,30 @@ const markMessageRead: ToolDefinition = {
   },
 };
 
-const queueDirective: ToolDefinition = {
-  name: "queue_directive",
-  description:
-    "Queue a directive (command) for a specific workhorse to consume on its next sync. Use this to trigger remote actions like reviving a tmux session ('revive_session') or canceling a pending dispatch. The directive lands as an AgentMessage with kind=directive, addressed to the named workhorse via the source string.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      projectId: { type: "string" },
-      host: { type: "string", description: "Workhorse host (e.g. 'perlmutter')." },
-      sessionName: { type: "string", description: "tmux session name (e.g. 'sd-cmockX')." },
-      name: { type: "string", description: "Directive name. Conventional values: revive_session, cancel_dispatch." },
-      payloadJson: { type: "string", description: "Optional JSON payload (string-encoded)." },
-    },
-    required: ["projectId", "host", "sessionName", "name"],
-    additionalProperties: false,
-  },
-  async handler(args) {
-    const projectId = requireString(args, "projectId");
-    const host = requireString(args, "host");
-    const sessionName = requireString(args, "sessionName");
-    const name = requireString(args, "name");
-    const payloadJson = optString(args, "payloadJson");
-    const msg = await prisma.agentMessage.create({
-      data: {
-        projectId,
-        kind: "directive",
-        severity: "info",
-        source: `dashboard@${host}:${sessionName}`,
-        body: name,
-        payloadJson: payloadJson ?? null,
-      },
-    });
-    return jsonResult({ id: msg.id, createdAt: msg.createdAt });
-  },
-};
-
 const dispatchWorkhorse: ToolDefinition = {
   name: "dispatch_workhorse",
-  description:
-    "Dispatch a directive to a specific workhorse, gated by the project's autonomy spectrum. Conservative-by-default: anything not explicitly listed in the project's `auto` or `propose` action classes will only post an 'asking permission' AgentMessage and NOT fire the directive. The actionClass is the policy key (e.g. 'restart_run', 'launch_sweep', 'revive_session'); pick one consistently per directive shape so leashes stay meaningful.",
+  description: "Send an RC tick to a project's live workhorses, gated by autonomy, bridge freshness and project tempo. Ask posts a permission alert; propose also posts a heads-up. Requires an existing live workhorse.",
   inputSchema: {
     type: "object",
     properties: {
       projectId: { type: "string" },
-      actionClass: {
-        type: "string",
-        description: "Autonomy policy key — what kind of action this is.",
-      },
-      host: { type: "string" },
-      sessionName: { type: "string" },
-      directiveName: {
-        type: "string",
-        description: "The directive name the workhorse will execute (e.g. 'revive_session').",
-      },
-      payloadJson: { type: "string", description: "Optional JSON payload (string-encoded)." },
-      reason: { type: "string", description: "≤200 char explanation for the user." },
+      bridgeName: { type: "string" },
+      actionClass: { type: "string", description: "Autonomy policy key; defaults to workhorse_tick." },
+      reason: { type: "string" },
     },
-    required: ["projectId", "actionClass", "host", "sessionName", "directiveName"],
+    required: ["projectId"],
     additionalProperties: false,
   },
   async handler(args) {
-    const { decideAutonomy } = await import("@/lib/brain/autonomy");
-    const projectId = requireString(args, "projectId");
-    const actionClass = requireString(args, "actionClass");
-    const host = requireString(args, "host");
-    const sessionName = requireString(args, "sessionName");
-    const directiveName = requireString(args, "directiveName");
-    const payloadJson = optString(args, "payloadJson");
-    const reason = optString(args, "reason") ?? "";
-
-    const decision = await decideAutonomy(projectId, actionClass);
-
-    if (decision === "ask") {
-      // Don't fire — surface a question instead.
-      const msg = await prisma.agentMessage.create({
-        data: {
-          projectId,
-          source: "review-agent",
-          kind: "alert",
-          severity: "decision",
-          body: `**Permission needed** — fire \`${directiveName}\` on \`${host}:${sessionName}\`? (action class: \`${actionClass}\`)\n\n${reason}`,
-          payloadJson: JSON.stringify({
-            host,
-            sessionName,
-            directiveName,
-            actionClass,
-            payload: payloadJson ? safeParseJson(payloadJson) : null,
-          }),
-        },
-      });
-      return jsonResult({
-        decision: "ask",
-        agentMessageId: msg.id,
-        note: "Action class not in project's auto/propose lists; surfaced as a permission request.",
-      });
-    }
-
-    // auto OR propose: fire by enqueuing a directive AgentMessage.
-    const directive = await prisma.agentMessage.create({
-      data: {
-        projectId,
-        kind: "directive",
-        severity: "info",
-        source: `dashboard@${host}:${sessionName}`,
-        body: directiveName,
-        payloadJson: payloadJson ?? null,
-      },
-    });
-
-    if (decision === "propose") {
-      // Also post a cancel-grace heads-up to the user feed.
-      await prisma.agentMessage.create({
-        data: {
-          projectId,
-          source: "review-agent",
-          kind: "alert",
-          severity: "suggestion",
-          body: `**Auto-firing** \`${directiveName}\` on \`${host}:${sessionName}\` (action class: \`${actionClass}\`). ${reason}`,
-          payloadJson: JSON.stringify({
-            directiveAgentMessageId: directive.id,
-            cancelable: true,
-          }),
-        },
-      });
-    }
-
-    return jsonResult({
-      decision,
-      directiveAgentMessageId: directive.id,
-    });
+    const { tickProjectWorkhorses } = await import("@/lib/bridge/tick");
+    return jsonResult(await tickProjectWorkhorses(requireString(args, "projectId"), {
+      bridgeName: optString(args, "bridgeName") ?? undefined,
+      actionClass: optString(args, "actionClass") ?? "workhorse_tick",
+      reason: optString(args, "reason") ?? "",
+      manual: true,
+    }));
   },
 };
-
-function safeParseJson(s: string): unknown {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return s;
-  }
-}
 
 /**
  * Per-kind allow-lists of plain field updates for `update_entity`.
@@ -1195,165 +1079,58 @@ const createMetricDefinition: ToolDefinition = {
   },
 };
 
-const dispatchWorkhorseSession: ToolDefinition = {
-  name: "dispatch_workhorse_session",
-  description:
-    "Spin up a brand-new workhorse on `host` for `projectId` against `repo` (absolute path on that host). On the next sync tick (≤60s) the host's sync.py picks up a `start_session` directive, registers the project locally, and launches `claude --append-system-prompt ...` in a fresh tmux session (tools reach ScienceDash through the installed `sciencedash` skill). If `initialPrompt` is provided it's tmux-send-keys'd into the REPL once it's up. Idempotent: re-dispatching kills any existing session with the same name. The host MUST already have sync.py running (one-time bootstrap via the workhorse-bootstrap launch endpoint). Returns the queued directive id. Conventionally this is auto-fired with no permission gate — counterpart is `stop_all_workhorses` for the kill switch.",
+const stopAllWorkhorses: ToolDefinition = {
+  name: "stop_all_workhorses",
+  description: "Pause automated RC wakes and ticks for all workhorses, optionally scoped to a project or bridge. Does not terminate an already running Claude turn.",
   inputSchema: {
     type: "object",
-    properties: {
-      projectId: { type: "string" },
-      host: {
-        type: "string",
-        description:
-          "Logical host name as it appears in `~/.sciencedash/config.json` on the target machine (e.g. 'perlmutter').",
-      },
-      repo: {
-        type: "string",
-        description:
-          "Absolute path to the repo on the target host (e.g. '/global/u1/m/me/research/dipole-pulse'). Tilde expansion happens on the workhorse side.",
-      },
-      initialPrompt: {
-        type: "string",
-        description:
-          "Optional first user message to send into the Claude REPL once it's up. Skip if you want the user to drive interactively.",
-      },
-    },
-    required: ["projectId", "host", "repo"],
+    properties: { projectId: { type: "string" }, bridgeName: { type: "string" } },
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const projectId = optString(args, "projectId");
+    const bridgeName = optString(args, "bridgeName");
+    const result = await prisma.workhorse.updateMany({
+      where: { ...(projectId ? { projectId } : {}), ...(bridgeName ? { bridgeName } : {}) },
+      data: { rcState: "stopped" },
+    });
+    return jsonResult({ stopped: result.count });
+  },
+};
+
+const resumeWorkhorse: ToolDefinition = {
+  name: "resume_workhorse",
+  description: "Resume automated RC wakes and ticks for a project's workhorses, optionally on one bridge.",
+  inputSchema: {
+    type: "object",
+    properties: { projectId: { type: "string" }, bridgeName: { type: "string" } },
+    required: ["projectId"],
     additionalProperties: false,
   },
   async handler(args) {
     const projectId = requireString(args, "projectId");
-    const host = requireString(args, "host");
-    const repo = requireString(args, "repo");
-    const initialPrompt = optString(args, "initialPrompt");
-
-    // Project must exist (FK enforcement + clearer error).
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
+    const bridgeName = optString(args, "bridgeName");
+    const result = await prisma.workhorse.updateMany({
+      where: { projectId, ...(bridgeName ? { bridgeName } : {}) },
+      data: { rcState: "live", wakeCount: 0, registeredAt: new Date() },
     });
-    if (!project) throw new Error(`project not found: ${projectId}`);
-
-    const sessionName = `sd-${projectId.slice(0, 10)}`;
-
-    // Cancel any pending unread `stop_session` directives for this
-    // (host, session). Same race fix as the workhorse-bootstrap launch
-    // endpoint: a stale stop intent could otherwise immediately undo
-    // the registration we're about to queue.
-    await prisma.agentMessage.updateMany({
-      where: {
-        projectId,
-        kind: "directive",
-        body: "stop_session",
-        source: { endsWith: `:${sessionName}` },
-        readAt: null,
-      },
-      data: { readAt: new Date() },
-    });
-
-    const payload: Record<string, unknown> = { repo };
-    if (initialPrompt && initialPrompt.trim()) {
-      payload.initialPrompt = initialPrompt.trim();
-    }
-
-    const directive = await prisma.agentMessage.create({
-      data: {
-        projectId,
-        kind: "directive",
-        severity: "info",
-        source: `mcp@${host}:${sessionName}`,
-        body: "start_session",
-        payloadJson: JSON.stringify(payload),
-      },
-    });
-
-    return jsonResult({
-      directiveId: directive.id,
-      projectId,
-      host,
-      sessionName,
-      repo,
-      note: "Queued. Workhorse should appear on the project page within ~60s once sync.py picks up the directive.",
-    });
-  },
-};
-
-const stopAllWorkhorses: ToolDefinition = {
-  name: "stop_all_workhorses",
-  description:
-    "Kill switch — queue `stop_session` directives for every registered Workhorse and delete the rows from the dashboard. Use when the user signals 'stop everything' or 'shut down all workhorses'. Returns the count stopped. Safe to call when nothing is running (returns 0).",
-  inputSchema: {
-    type: "object",
-    properties: {},
-    additionalProperties: false,
-  },
-  async handler() {
-    const workhorses = await prisma.workhorse.findMany({
-      select: { id: true, host: true, projectId: true, sessionName: true },
-    });
-    if (workhorses.length === 0) {
-      return jsonResult({ stopped: 0, note: "no registered workhorses" });
-    }
-    // Queue directives in one batch, then delete the rows. The
-    // /api/mcp/sync flap-prevention guard (pendingStopSession) keeps
-    // sync.py from re-upserting them before the directive fires.
-    await prisma.agentMessage.createMany({
-      data: workhorses.map((w) => ({
-        projectId: w.projectId,
-        kind: "directive",
-        severity: "info",
-        source: `mcp@${w.host}:${w.sessionName}`,
-        body: "stop_session",
-        payloadJson: null,
-      })),
-    });
-    await prisma.workhorse.deleteMany({
-      where: { id: { in: workhorses.map((w) => w.id) } },
-    });
-    return jsonResult({
-      stopped: workhorses.length,
-      hosts: Array.from(new Set(workhorses.map((w) => w.host))),
-    });
+    return jsonResult({ resumed: result.count });
   },
 };
 
 const removeWorkhorse: ToolDefinition = {
   name: "remove_workhorse",
-  description:
-    "Stop and unregister a workhorse. Queues a `stop_session` directive (sync.py kills the tmux session + removes the project from the host's local ~/.sciencedash/config.json) and deletes the Workhorse row from the dashboard. Same mechanism as the dashboard's Remove button. Other workhorses on the same host (for other projects) are unaffected.",
+  description: "Unregister a workhorse by deleting its row. Does not terminate the remote Claude session.",
   inputSchema: {
     type: "object",
-    properties: {
-      id: { type: "string", description: "Workhorse id." },
-    },
+    properties: { id: { type: "string" } },
     required: ["id"],
     additionalProperties: false,
   },
   async handler(args) {
     const id = requireString(args, "id");
-    const w = await prisma.workhorse.findUnique({
-      where: { id },
-      select: { id: true, host: true, projectId: true, sessionName: true },
-    });
-    if (!w) throw new Error(`workhorse not found: ${id}`);
-    await prisma.agentMessage.create({
-      data: {
-        projectId: w.projectId,
-        kind: "directive",
-        severity: "info",
-        source: `mcp@${w.host}:${w.sessionName}`,
-        body: "stop_session",
-        payloadJson: null,
-      },
-    });
     await prisma.workhorse.delete({ where: { id } });
-    return jsonResult({
-      id: w.id,
-      host: w.host,
-      sessionName: w.sessionName,
-      removed: true,
-    });
+    return jsonResult({ id, removed: true });
   },
 };
 
@@ -1423,16 +1200,15 @@ const registerRcWorkhorse: ToolDefinition = {
     const rcEnvId = requireString(args, "rcEnvId");
     const repo = optString(args, "repo");
     if (!/^[a-z0-9-]{1,40}$/.test(bridgeName)) throw new Error("invalid bridgeName");
-    const sessionName = "rc-" + projectId.slice(0, 10);
     const data = {
-      projectId, transport: "rc", bridgeName, rcSessionId, rcEnvId,
+      projectId, bridgeName, rcSessionId, rcEnvId, registeredAt: new Date(),
       rcState: "live", wakeCount: 0, recreateRequestedAt: null, lastWakeAt: null,
-      ...(repo ? { configJson: JSON.stringify({ repo }) } : {}),
+      ...(repo ? { repo } : {}),
     };
     const workhorse = await prisma.$transaction(async (tx) => {
       const row = await tx.workhorse.upsert({
-        where: { host_sessionName: { host: bridgeName, sessionName } },
-        create: { host: bridgeName, sessionName, ...data },
+        where: { projectId_bridgeName: { projectId, bridgeName } },
+        create: data,
         update: data,
       });
       await tx.agentMessage.updateMany({
@@ -1456,7 +1232,6 @@ export const writeTools: ToolDefinition[] = [
   setProjectBlocker,
   postMessage,
   markMessageRead,
-  queueDirective,
   dispatchWorkhorse,
   submitBrainChat,
   createProgramme,
@@ -1467,6 +1242,6 @@ export const writeTools: ToolDefinition[] = [
   createMetricDefinition,
   refreshRepo,
   removeWorkhorse,
-  dispatchWorkhorseSession,
+  resumeWorkhorse,
   stopAllWorkhorses,
 ];

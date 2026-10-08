@@ -496,9 +496,11 @@ export function canUseToolForBrainHeartbeat(
     "record_decision",
     "update_hypothesis_status",
     "move_run_to_hypothesis",
-    "queue_directive",
     "dispatch_workhorse",
     "register_rc_workhorse",
+    "resume_workhorse",
+    "stop_all_workhorses",
+    "remove_workhorse",
   ]);
   const hosts = allowedHosts.map((h) => h.toLowerCase());
   const mcpPrefixes = trustedMcpServers.map((s) => `mcp__${s}__`);

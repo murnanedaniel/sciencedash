@@ -1,144 +1,91 @@
 # Workhorse protocol
 
-ScienceDash's "brains" live in the dashboard; the "workhorses" — actual
-Claude Code sessions running on Perlmutter, Vast, etc. — live wherever the
-GPUs are. They share state via the dashboard's project DB, not via direct
-conversation.
+Workhorses are Claude Code Remote Control (RC) sessions. The dashboard records
+one workhorse per `(projectId, bridgeName)`. Project state is shared through the
+`sciencedash` skill; the bridge carries session messages.
 
-This doc specifies the wire protocol between a workhorse and the dashboard.
+## Bridge heartbeat
 
-## Topology
-
-```
-[ workhorse host (e.g. perlmutter) ]                  [ dashboard (laptop) ]
-  ~/.sciencedash/
-  ├── config.json                                       /api/mcp        ← MCP tools
-  ├── sync.py     ──── cron every minute  ──── HTTP ──→ /api/mcp/sync   ← workhorse-only
-  ├── sync.log
-  └── <projectId>/
-      ├── outbox.jsonl    appended by Claude tool calls + sync heartbeats
-      ├── inbox.jsonl     directives consumed by sync.py (revive_session, ...)
-      ├── PROJECT_BRIEF.md  (Phase F — brain memory tier 1)
-      ├── MEMORY_LOG.md     (Phase F — brain memory tier 2)
-      └── HUMAN_DIRECTIVE.md
-```
-
-Workhorse identity: `<host>:sd-<projectId>` (e.g. `perlmutter:sd-cmockitum0...`).
-
-## sync.py loop (one tick per minute)
-
-1. Acquire `~/.sciencedash/sync.lock` (skip if held; stale after 5 min).
-2. For each `project_cfg` in `config.projects`:
-   a. Read up to 256 pending lines from `<projectId>/outbox.jsonl`. The
-      outbox is renamed to `outbox.jsonl.flushing` atomically; if the
-      POST fails, the next tick replays the same `.flushing` file.
-   b. Append a `{"kind":"heartbeat","source":"sync"}` item.
-   c. POST `{host, projectId, sessionName, outbox}` to
-      `/api/mcp/sync`.
-   d. Receive `{ack, toolResults, directives}`. Commit the flush
-      (delete `.flushing`).
-   e. Execute each directive locally (e.g. `revive_session`). Append a
-      `tool_call: post_message` outbox entry summarising the result.
-3. Release lockfile, exit.
-
-## /api/mcp/sync request
+The [bridge keeper](../tools/bridge-keeper/README.md) runs `claude rc` under
+Slurm's cron QOS on Perlmutter. Its heartbeat posts every 60 seconds to
+`POST /api/bridge/heartbeat` with `Authorization: Bearer <token>`:
 
 ```json
 {
-  "host": "perlmutter",
-  "projectId": "cmockitum0...",
-  "sessionName": "sd-cmockitum0...",
-  "outbox": [
-    {"at": "2026-04-26T00:00:00Z", "kind": "heartbeat", "source": "sync"},
-    {"at": "2026-04-26T00:00:05Z", "kind": "heartbeat", "source": "claude"},
-    {"at": "2026-04-26T00:00:10Z",
-     "kind": "tool_call", "name": "post_message",
-     "args": {"projectId":"...", "body":"...", "severity":"info"}}
-  ]
+  "name": "perlmutter",
+  "envId": "env_example",
+  "node": "login32",
+  "jobId": "12345",
+  "rcAlive": true,
+  "claudeVersion": "<version>",
+  "liveSessions": ["cse_example"]
 }
 ```
 
-Outbox item `kind`s:
+Only `name` and `rcAlive` are required. Names match `[a-z0-9-]{1,40}`;
+`liveSessions` contains at most 200 ids. The endpoint upserts `Bridge` by name,
+stores the payload and receipt time, and returns `{ "ok": true }`.
 
-| kind         | source     | effect                                                                   |
-|--------------|------------|--------------------------------------------------------------------------|
-| `heartbeat`  | `sync`     | Update `Workhorse.lastHeartbeat`. Indicates `host_reachable`.            |
-| `heartbeat`  | `claude`   | Update `Workhorse.lastClaudeBeat`. Indicates `claude_active`.            |
-| `tool_call`  | (n/a)      | Execute the named MCP tool with `args`. Result echoed in `toolResults`.  |
+A bridge is fresh for less than 3 minutes after its last heartbeat, stale until
+15 minutes, and down thereafter (or when no heartbeat exists). `/api/health/hosts`
+returns bridges only, including node, environment, age and workhorse count.
 
-Successful `tool_call` items also implicitly bump `lastClaudeBeat`.
+## Registration and lifecycle
 
-## /api/mcp/sync response
+Create a session on the bridge through a Claude session's remote tools, then call
+`register_rc_workhorse` with `projectId`, `bridgeName`, `rcSessionId`, `rcEnvId`
+and optional `repo`. Registration upserts by project and bridge, sets state to
+`live`, resets wake attempts, and acknowledges pending `recreate_rc_workhorse`
+directives for that project. The dashboard does not create remote sessions.
 
-```json
-{
-  "ack": 3,
-  "toolResults": [
-    {"name": "post_message", "ok": true, "result": {...}}
-  ],
-  "directives": [
-    {"id": "...", "createdAt": "...", "body": "revive_session", "payloadJson": null}
-  ]
-}
-```
+The project panel links to `https://claude.ai/code/<rcSessionId>` and shows
+bridge, state, last wake and last tick. States are `live`, `waking`,
+`needs_recreate`, `stopped`, and derived `bridge_down` when the bridge is not
+fresh. Stopped state remains visible even if the bridge is down.
 
-The dashboard marks delivered directives as `readAt = now()` so they
-don't re-fire. If the workhorse crashes mid-execution, the next sync
-tick simply gets nothing (already marked read); use timestamps in
-status messages to detect lost executions.
+- `stop_all_workhorses(projectId?, bridgeName?)` sets state to `stopped`.
+  Automated ticks and reconciliation skip stopped rows; a running turn can finish.
+- `resume_workhorse(projectId, bridgeName?)` sets state to `live` and wake count to zero.
+- `remove_workhorse(id)` deletes the registration. It does not terminate the remote session.
 
-## Liveness derivation (dashboard side)
+## Recovery
 
-```
-host_reachable     := lastHeartbeat  > now - 3 min
-claude_active      := lastClaudeBeat > now - 10 min
-```
+The reconciler runs every minute for active projects whose workhorse tempo is not
+paused. It never acts on a workhorse with a non-fresh bridge or stopped state.
 
-UI states:
+When the environment matches, a session in `liveSessions` is marked live and its
+wake count reset. Session ids with `session_` and `cse_` prefixes compare by suffix.
+Missing sessions receive a wake message via `claude -p <message> --cloud <id>
+--output-format json`, without a shell. Retry delay is `min(5 min × 2^wakeCount,
+60 min)`. After eight wakes, or if the environment changes, the reconciler
+records a `recreate_rc_workhorse` directive and posts a warning, deduplicated for
+six hours. A person must create and register the replacement.
 
-| state        | host_reachable | claude_active                                |
-|--------------|----------------|----------------------------------------------|
-| 🟢 alive     | yes            | yes                                          |
-| 🟡 idle      | yes            | last beat 10–60 min ago                      |
-| 🔴 dead      | yes            | last beat > 60 min ago, or never beat        |
-| ⚫ unreachable | no             | (irrelevant)                                  |
+Bridge outages of at least thirty minutes generate a deduplicated system alert;
+a fresh heartbeat clears it. The keeper handles bridge recovery. Restarts within
+about four hours can preserve the environment id; longer outages may require
+session recreation. See the [RC design](./specs/rc-transport.md) for context.
 
-## Directive vocabulary
+## Workhorse ticks
 
-| body              | payload         | sync.py effect                                                    |
-|-------------------|-----------------|-------------------------------------------------------------------|
-| `revive_session`  | (none)          | `tmux kill-session ...; tmux new -d -s <session> "claude --continue"` |
-| `ping`            | (none)          | Replies with a `pong` post_message in outbox.                      |
+Every thirty minutes the worker considers active projects. Scheduled ticks require
+`workhorse_tick` autonomy `auto`; `ask` posts a permission alert, and `propose`
+skips scheduled delivery. Explicit `dispatch_workhorse(projectId, bridgeName?,
+actionClass?, reason?)` uses the same RC delivery and tempo gates; `propose` also
+posts a heads-up. Its default action class is `workhorse_tick`.
 
-Add new directives by extending `execute_directive` in `sync.py` and
-documenting them here.
+Tempo is `workhorseIntervalSec`: zero pauses, null defaults to one hour. Each tick
+requires state `live`, a fresh bridge and an elapsed interval since `lastTickAt`.
+The dashboard records the attempt time and sends:
 
-### Hosts without cron (NERSC Perlmutter, …)
+> ScienceDash tick for project "<title>" (<projectId>): check the project brief and recent check-ins via the sciencedash skill, do the next step if there is one, post a check-in, then stop. If nothing to do, reply "idle".
 
-`setup.sh` falls back to a tmux-driven sync loop on hosts where
-`crontab` is missing. A detached session named `sd-sync` runs
-`while true; do sync.py; sleep 60; done`. Same minute-granularity,
-same outbox semantics. The trade-off: tmux sessions can be killed by
-the host's reaper after long uptime, where cron itself never is. If
-`sd-sync` dies, re-run `setup.sh` (idempotent — it kills any stale
-session and respawns).
+Failed sends post a warning and wait until the next eligible interval. Setting
+`SCIENCEDASH_BRIDGE_WAKE=0` disables actual sends while retaining state updates.
 
-Inspect / re-attach:
+## Ambient context
 
-```bash
-tmux ls                    # should list sd-sync
-tmux attach -t sd-sync     # see the loop running
-```
-
-## Doomsday recovery
-
-If cron itself dies on the host (account suspended, machine rebuilt) — or
-if the `sd-sync` tmux session got reaped on a cron-less host:
-
-```bash
-ssh <user>@<host>
-DASHBOARD=https://your.dashboard HOST=<host> bash ~/.sciencedash-bootstrap/setup.sh
-```
-
-`setup.sh` is idempotent: it replaces the cron entry (or respawns the
-tmux loop) without duplicating.
+Transcript shipping is independent of workhorse registration. Keep
+`tools/transcript-sync/`, `tools/ambient/`, `/api/ambient-bootstrap/launch` and
+`/api/ingest/*` installed and reachable. The shipper, bridge heartbeat and `sd.py`
+all retain bearer authentication.

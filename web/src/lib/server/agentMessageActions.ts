@@ -3,141 +3,39 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 
-export async function reviveWorkhorseAction(formData: FormData): Promise<void> {
-  const workhorseId = String(formData.get("workhorseId") ?? "");
-  if (!workhorseId) return;
-  const w = await prisma.workhorse.findUnique({
-    where: { id: workhorseId },
-    select: { host: true, projectId: true, sessionName: true },
-  });
-  if (!w) return;
-  await prisma.agentMessage.create({
-    data: {
-      projectId: w.projectId,
-      kind: "directive",
-      severity: "info",
-      source: `dashboard@${w.host}:${w.sessionName}`,
-      body: "revive_session",
-      payloadJson: null,
-    },
-  });
-  revalidatePath(`/projects/${w.projectId}`);
+async function runWorkhorseTool(tool: string, args: Record<string, unknown>) {
+  const { callTool } = await import("@/lib/mcp/server");
+  const result = await callTool(tool, args);
+  if (result.isError) throw new Error(JSON.stringify(result.content));
 }
 
-/**
- * Queue a `workhorse_tick` directive for a specific workhorse session.
- * sync.py picks it up on its next 60s tick and tmux send-keys the prompt
- * into the running Claude REPL. Optional custom prompt via formData.prompt.
- *
- * Idempotency: if an unread `workhorse_tick` directive is already pending
- * for this exact (host, sessionName) channel, this is a no-op so a
- * double-click doesn't queue two prompts back-to-back.
- */
-export async function tickWorkhorseAction(formData: FormData): Promise<void> {
-  const workhorseId = String(formData.get("workhorseId") ?? "");
-  if (!workhorseId) return;
-  const w = await prisma.workhorse.findUnique({
-    where: { id: workhorseId },
-    select: { host: true, projectId: true, sessionName: true },
-  });
+async function changeWorkhorse(formData: FormData, tool: string) {
+  const id = String(formData.get("workhorseId") ?? "");
+  if (!id) return;
+  const w = await prisma.workhorse.findUnique({ where: { id } });
   if (!w) return;
-  const source = `dashboard@${w.host}:${w.sessionName}`;
-  const existing = await prisma.agentMessage.findFirst({
-    where: {
-      projectId: w.projectId,
-      kind: "directive",
-      source,
-      body: "workhorse_tick",
-      readAt: null,
-    },
-    select: { id: true },
-  });
-  if (existing) {
-    revalidatePath(`/projects/${w.projectId}`);
-    return;
-  }
-  const customPrompt = String(formData.get("prompt") ?? "").trim();
-  await prisma.agentMessage.create({
-    data: {
-      projectId: w.projectId,
-      kind: "directive",
-      severity: "info",
-      source,
-      body: "workhorse_tick",
-      payloadJson: customPrompt ? JSON.stringify({ prompt: customPrompt }) : null,
-    },
+  await runWorkhorseTool(tool, tool === "remove_workhorse" ? { id } : {
+    projectId: w.projectId, bridgeName: w.bridgeName,
   });
   revalidatePath(`/projects/${w.projectId}`);
-}
-
-/**
- * Stop and unregister a workhorse:
- *   1. Queue a `stop_session` directive — sync.py on the host kills the
- *      tmux session and removes the project entry from its local
- *      ~/.sciencedash/config.json so future sync ticks don't beat for it.
- *   2. Optimistically delete the Workhorse row. There's a tiny window
- *      where sync.py might beat between (1) and (2) and re-upsert the
- *      row, but the directive in the same response immediately stops
- *      it — net result: the row stays gone.
- *
- * If the host is offline, the directive sits unread until the host
- * comes back; on the first beat it executes before any visible flap.
- */
-export async function removeWorkhorseAction(formData: FormData): Promise<void> {
-  const workhorseId = String(formData.get("workhorseId") ?? "");
-  if (!workhorseId) return;
-  const w = await prisma.workhorse.findUnique({
-    where: { id: workhorseId },
-    select: { host: true, projectId: true, sessionName: true },
-  });
-  if (!w) return;
-  await prisma.agentMessage.create({
-    data: {
-      projectId: w.projectId,
-      kind: "directive",
-      severity: "info",
-      source: `dashboard@${w.host}:${w.sessionName}`,
-      body: "stop_session",
-      payloadJson: null,
-    },
-  });
-  await prisma.workhorse.delete({ where: { id: workhorseId } });
-  revalidatePath(`/projects/${w.projectId}`);
-}
-
-/**
- * Bulk kill switch — queue `stop_session` directives for every Workhorse
- * row and optimistically delete the rows. Pair with chat's auto-fire
- * autonomy: when the brain hallucinates a spawn, one click takes it all
- * back. No-op when nothing is registered.
- */
-export async function stopAllWorkhorsesAction(): Promise<void> {
-  const workhorses = await prisma.workhorse.findMany({
-    select: { id: true, host: true, projectId: true, sessionName: true },
-  });
-  if (workhorses.length === 0) {
-    revalidatePath("/");
-    revalidatePath("/settings");
-    return;
-  }
-  await prisma.agentMessage.createMany({
-    data: workhorses.map((w) => ({
-      projectId: w.projectId,
-      kind: "directive",
-      severity: "info",
-      source: `dashboard@${w.host}:${w.sessionName}`,
-      body: "stop_session",
-      payloadJson: null,
-    })),
-  });
-  await prisma.workhorse.deleteMany({
-    where: { id: { in: workhorses.map((w) => w.id) } },
-  });
-  revalidatePath("/");
   revalidatePath("/settings");
-  for (const w of workhorses) {
-    revalidatePath(`/projects/${w.projectId}`);
-  }
+}
+
+export async function stopWorkhorseAction(formData: FormData): Promise<void> {
+  await changeWorkhorse(formData, "stop_all_workhorses");
+}
+
+export async function resumeWorkhorseAction(formData: FormData): Promise<void> {
+  await changeWorkhorse(formData, "resume_workhorse");
+}
+
+export async function removeWorkhorseAction(formData: FormData): Promise<void> {
+  await changeWorkhorse(formData, "remove_workhorse");
+}
+
+export async function stopAllWorkhorsesAction(): Promise<void> {
+  await runWorkhorseTool("stop_all_workhorses", {});
+  revalidatePath("/", "layout");
 }
 
 export async function markMessageReadAction(formData: FormData): Promise<void> {

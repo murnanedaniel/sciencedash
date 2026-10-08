@@ -14,7 +14,7 @@ const heartbeat = z.object({
   liveSessions: z.array(z.string()).max(200).optional(),
 });
 
-// Authentication uses proxy.ts's verifyBearer path, like /api/mcp/sync.
+// Authentication uses proxy.ts's verifyBearer path, like the ambient ingest endpoints.
 export async function POST(req: NextRequest) {
   let raw: unknown;
   try {

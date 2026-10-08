@@ -45,10 +45,7 @@ type ChatStreamRequest = {
  * MCP write tools are wired in by name. Bash/Read/Write/Edit are
  * available so the chat can actually look at local repos when asked
  * (and edit files when the user wants).
- *
- * Notably present: `mcp__sciencedash__dispatch_workhorse_session` — the
- * user's "auto + kill switch" autonomy posture means the chat fires
- * this without asking.
+
  */
 const ALLOWED_TOOLS = [
   // Read tools (read-only — safe everywhere)
@@ -69,9 +66,9 @@ const ALLOWED_TOOLS = [
   "mcp__sciencedash__set_project_blocker",
   "mcp__sciencedash__post_message",
   "mcp__sciencedash__mark_message_read",
-  "mcp__sciencedash__queue_directive",
   "mcp__sciencedash__dispatch_workhorse",
-  "mcp__sciencedash__dispatch_workhorse_session",
+  "mcp__sciencedash__register_rc_workhorse",
+  "mcp__sciencedash__resume_workhorse",
   "mcp__sciencedash__stop_all_workhorses",
   "mcp__sciencedash__remove_workhorse",
   "mcp__sciencedash__attach_project_to_programme",

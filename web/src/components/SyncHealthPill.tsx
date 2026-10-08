@@ -1,19 +1,10 @@
 "use client";
 
-/**
- * Sidebar sync.py health pill — one row per remote host.
- *
- * Shape mirrors the per-workhorse pill in WorkhorsesPanel: dot + label +
- * "on: loginXX · 23s ago". Color rolls up from the freshest heartbeat
- * across all workhorses on the host. Polls /api/health/hosts every 30s.
- *
- * Hidden when no workhorses are registered anywhere (no pills to show).
- */
+/** Sidebar bridge health, refreshed every thirty seconds. */
 import { useEffect, useState } from "react";
 
 type Status = "alive" | "stale" | "down";
 type HostHealth = {
-  kind?: "bridge";
   host: string;
   status: Status;
   activeHost: string | null;
@@ -91,7 +82,7 @@ export function SyncHealthPill() {
       </div>
       {hosts.map((h) => (
         <div
-          key={`${h.kind ?? "tmux"}:${h.host}`}
+          key={h.host}
           title={
             h.lastHeartbeat
               ? `last beat: ${h.lastHeartbeat}\nworkhorses on host: ${h.workhorseCount}`
@@ -117,7 +108,7 @@ export function SyncHealthPill() {
             }}
           >
             <span style={{ fontSize: 11 }}>{DOT[h.status]}</span>
-            <span>{h.host}{h.kind === "bridge" ? " (rc)" : ""}</span>
+            <span>{h.host}</span>
             <span
               className="muted"
               style={{ marginLeft: "auto", fontSize: 10 }}

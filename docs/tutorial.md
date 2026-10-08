@@ -71,7 +71,7 @@ A project goes through these states:
 3. **Link sources**:
    - **GitHub repo** — Overview tab → "GitHub repos" card → "Add repo". Or click **Quickstart repo ✨** to spawn a new private repo from your template (set `SCIENCEDASH_REPO_TEMPLATE` env var).
    - **W&B project** — Overview tab → "W&B projects" card → "Add". Multiple sources per project are supported.
-   - **Local repo path** — In the AI actions card, click **Chat with project → Auto-detect** (walks `~/Research/`, `~/code/`, etc.) or paste an absolute path manually. Required for Chat-with-project, BrainHeartbeat memory file mirroring, and the workhorse bootstrap.
+   - **Local repo path** — In the AI actions card, click **Chat with project → Auto-detect** (walks `~/Research/`, `~/code/`, etc.) or paste an absolute path manually. Required for Chat-with-project, BrainHeartbeat memory file mirroring, and local project context.
 
 4. **Add hypotheses** — Hypotheses & Runs tab → "New hypothesis". Each gets a compute budget in GPU-hours. Runs (synced from W&B) are attached to one hypothesis at a time.
 
@@ -186,44 +186,26 @@ The brain consumes it on the next cycle and archives it as `HUMAN_DIRECTIVE.<tim
 
 ## Workhorses
 
-A **workhorse** is a long-running Claude Code session on a remote host (Perlmutter login node, Vast box, your home server). It reads/writes the same project state via MCP.
+A **workhorse** is a Claude Code Remote Control session on a named bridge.
+It reads and writes project state through the `sciencedash` skill.
 
-### Liveness — two-tier
+Follow the [bridge keeper README](../tools/bridge-keeper/README.md), create a
+session on the `perlmutter` bridge, then call `register_rc_workhorse` with the
+project, bridge, session and environment ids (plus optional repo).
 
-| Signal | Mechanism | UI state |
-|---|---|---|
-| `host_reachable` | Sync daemon's per-minute heartbeat in outbox | 🟢 / ⚫ |
-| `claude_active` | Direct MCP tool calls update lastClaudeBeat via `X-Workhorse-Id` header | 🟢 / 🟡 / 🔴 |
+The Workhorses panel shows bridge, session link, state, last wake and last tick.
+States are `live`, `waking`, `needs_recreate`, `stopped` and `bridge_down`.
+**Stop** pauses automated wakes and ticks; **Resume** re-enables them;
+**Remove** unregisters the session. A running Claude turn may still finish.
 
-Four UI states:
-- **🟢 alive** — both fresh
-- **🟡 idle** — host fresh, claude beat 10–60 min old (might just be waiting)
-- **🔴 dead** — host fresh, claude silent past threshold → "Revive" button appears
-- **⚫ unreachable** — sync daemon stale (cron itself died)
+The keeper recovers the bridge; the dashboard wakes sessions after recovery.
+A changed environment or eight unsuccessful wakes prompts a recreation request.
+Create and register a replacement session to acknowledge it. See
+[cluster integration](./cluster-integration.md) and
+[workhorse protocol](./workhorse-protocol.md) for details.
 
-### Bootstrapping one
-
-See [docs/cluster-integration.md](./cluster-integration.md) for the full guide. Quickstart:
-
-```bash
-# On the laptop:
-ssh -R 3000:localhost:3000 -N user@host           # reverse tunnel so cluster can reach dashboard
-scp tools/workhorse-bootstrap/{sync.py,setup.sh} user@host:~/.sciencedash-bootstrap/
-ssh user@host
-DASHBOARD=http://localhost:3000 HOST=perlmutter bash ~/.sciencedash-bootstrap/setup.sh
-```
-
-Then edit `~/.sciencedash/config.json` on the host to add projects, re-run setup.sh (idempotent), and start sessions:
-
-```bash
-tmux new -As sd-<projectId> "cd <repo> && claude --mcp-config ~/.sciencedash/<projectId>/mcp-config.json"
-```
-
-### Reviving
-
-When the cluster's reaper kills your tmux Claude, the panel flips 🔴 within ~3 min. Click **Revive**. The dashboard queues a `revive_session` directive; the next cron tick (≤1 min) on the host runs `tmux kill-session ...; tmux new -d -s <session> "claude --continue"`. Round-trip ≤2 minutes.
-
-If even cron dies (rare): SSH in, re-run `setup.sh`. Idempotent.
+Ambient transcript shipping remains independent: install it through Settings on
+each machine to retain searchable conversations and the `sciencedash` skill.
 
 ---
 
@@ -239,11 +221,11 @@ Currently exposes ~20 tools across read / write / dispatch / spawn:
 
 ### Write
 
-`create_check_in`, `record_decision`, `add_note`, `update_hypothesis_status`, `move_run_to_hypothesis`, `post_message`, `mark_message_read`, `queue_directive`.
+`create_check_in`, `record_decision`, `add_note`, `update_hypothesis_status`, `move_run_to_hypothesis`, `post_message`, `mark_message_read`, `register_rc_workhorse`, `resume_workhorse`, `stop_all_workhorses`, `remove_workhorse`.
 
 ### Dispatch (autonomy-gated)
 
-`dispatch_workhorse` — the brain's path for non-trivial mutations. Consults Project.autonomyJson; default-conservative.
+`dispatch_workhorse` — sends a tick to existing live RC workhorses. Consults project autonomy, bridge freshness and project tempo. No live registration returns an error.
 
 ### Spawn (existing in-app flows)
 
@@ -257,13 +239,11 @@ curl -s -X POST http://localhost:3000/api/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '.result.tools[].name'
 ```
 
-### Local Claude using the MCP
+### Local and cluster Claude
 
-The Chat-with-project button generates a one-time tmux command. It also offers **"Persist .mcp.json"** which writes `<localPath>/.mcp.json` so any subsequent `claude` invocation in that directory auto-loads the MCP.
-
-### Cluster Claude using the MCP
-
-`setup.sh` writes per-project `~/.sciencedash/<projectId>/mcp-config.json` files that include the `X-Workhorse-Id` header. So every tool call doubles as a `claude_active` heartbeat. **No separate hook needed.**
+Install the `sciencedash` skill with the ambient bootstrap in Settings. Use
+`sd.py call <tool> '<json-args>'` to reach the dashboard. Bridge heartbeats
+report health independently of tool calls.
 
 ---
 
@@ -273,8 +253,8 @@ Per-project leash on what the brain can fire on its own:
 
 ```json
 {
-  "auto":    ["revive_session"],   // fire immediately, log it
-  "propose": [],                   // fire AND post a "doing X, cancel within 60s" heads-up
+  "auto":    ["workhorse_tick"],   // fire immediately, log it
+  "propose": [],                   // explicit dispatch fires AND posts a heads-up; scheduled ticks skip
   "ask":     [],                   // surface a permission-needed alert; do NOT fire
   "spendCapGpuH":      50,
   "spendCapTokensUsd": 5.0
@@ -295,7 +275,7 @@ A scheduled review agent runs every ~2 weeks and proposes per-project defaults b
 
 Conventional names the dispatch tools use (extend as you ship more dispatch types):
 
-- `revive_session` — restart a workhorse's tmux Claude
+- `workhorse_tick` — nudge an existing live RC workhorse
 - `restart_run` — re-launch a failed/OOMed W&B run
 - `launch_sweep` — kick off a W&B sweep
 - `escalate_budget` — bump a hypothesis's compute budget
@@ -310,7 +290,7 @@ Pick consistent names per dispatch shape so leashes stay meaningful over time.
 | Surface | What it does | Trigger | Cost (approx) |
 |---|---|---|---|
 | **Quickstart repo** | Spawn a private GitHub repo from a template, let Claude scaffold it from project context | Project page → GitHub repos card | $0.20–0.80 |
-| **Chat with project** | Generate the tmux+claude command with MCP loaded | Project page → AI actions | free (just generates a command) |
+| **Chat with project** | Generate a local Claude command with project context | Project page → AI actions | free (just generates a command) |
 | **Brain heartbeat** | One supervisor cycle: triage state, surface to feed, update memory | Project page or /today | $0.10–0.20/cycle |
 | **Critical review** | MCP-grounded post-mortem with evidence + proposed patches | Project page → AI actions | $0.15–0.30 |
 | **Literature review** | Propose papers, verify against arXiv, backfill unverified existing notes | Project page → AI actions | $0.10–1.20 |
@@ -337,13 +317,9 @@ Pick consistent names per dispatch shape so leashes stay meaningful over time.
 
 ### Hook up Perlmutter Claude
 
-1. SSH-tunnel: `ssh -R 3000:localhost:3000 -N perlmutter`.
-2. `scp tools/workhorse-bootstrap/{sync.py,setup.sh} perlmutter:~/.sciencedash-bootstrap/`.
-3. On Perlmutter: `DASHBOARD=http://localhost:3000 HOST=perlmutter bash ~/.sciencedash-bootstrap/setup.sh`.
-4. Edit `~/.sciencedash/config.json` to register your projects.
-5. Re-run setup.sh.
-6. `tmux new -As sd-<projectId> "cd <repo> && claude --mcp-config ~/.sciencedash/<projectId>/mcp-config.json"`.
-7. The Workhorses panel on the project page should flip 🟢 within ~2 min.
+Follow the [bridge keeper README](../tools/bridge-keeper/README.md). Start a
+session on the bridge, call `register_rc_workhorse`, and verify the session
+link and bridge state on the project page.
 
 ### Send the brain a one-shot directive
 
@@ -365,8 +341,10 @@ The dashboard's Chat-with-project button and your terminal's `claude --continue`
 ### "tools/list returned 0 tools"
 The dashboard isn't running. `~/bin/start-sciencedash.sh dev`.
 
-### Workhorse stuck at 🟡 idle forever
-Cluster Claude isn't actually using the MCP. Check that you ran `claude --mcp-config ~/.sciencedash/<projectId>/mcp-config.json` — a bare `claude` won't load it.
+### Workhorse shows bridge_down or needs_recreate
+
+Check the keeper heartbeat and dashboard reachability. If the bridge environment
+changed, create and register a replacement session. See the keeper README.
 
 ### Brain heartbeat reports "schema validation errors"
 You're on a stale Prisma client. `npx prisma generate` and restart.
@@ -374,17 +352,15 @@ You're on a stale Prisma client. `npx prisma generate` and restart.
 ### Critical review hallucinates content
 You're on the v1 prompt. Pull latest; the v2 critical review is MCP-backed and grounds findings in real evidence.
 
-### Workhorse 🔴 dead immediately after a successful Revive
-`tmux` or `claude` not on cron's PATH. Edit your crontab line to set `PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin` before the sync.py call.
-
 ### Brain memory log is empty after a heartbeat
 The brain returned no content (or an unparseable response). Check `/jobs/<jobId>` for the trace. The 5-minute anti-burn floor will skip the next attempt; use **Force** to retry.
 
 ### "no Project found" when calling MCP from the cluster
 The reverse SSH tunnel dropped. Restart `ssh -R 3000:localhost:3000 -N perlmutter`.
 
-### Doomsday — workhorse host's cron got reset
-SSH in, run `bash ~/.sciencedash-bootstrap/setup.sh` again. Idempotent. ~30 seconds.
+### Keeper schedule lost
+
+Restore the `scrontab` entry from the [keeper README](../tools/bridge-keeper/README.md).
 
 ---
 
@@ -408,8 +384,8 @@ SSH in, run `bash ~/.sciencedash-bootstrap/setup.sh` again. Idempotent. ~30 seco
 │ W&B  │  │ CLUSTER  │               │ LOCAL    │   workers
 │ APIs │  │ CLAUDE   │               │ TERMINAL │
 │      │  │(Perlmutter│               │ CLAUDE   │
-│      │  │ tmux,     │               │          │
-│      │  │ revivable)│               │          │
+│      │  │ RC bridge │               │          │
+│      │  │ sessions) │               │          │
 └──────┘  └──────────┘               └──────────┘
                   ▲                        ▲
                   └──────── MCP ───────────┘
@@ -422,7 +398,7 @@ Brains and workers communicate **only via the project DB** (read+write through M
 ## Reference docs
 
 - [Cluster integration](./cluster-integration.md) — bootstrap, SSH tunnel, registration.
-- [Workhorse protocol](./workhorse-protocol.md) — wire format for outbox/inbox/sync.
+- [Workhorse protocol](./workhorse-protocol.md) — bridge heartbeat, recovery and ticks.
 
 ## Architecture decisions
 

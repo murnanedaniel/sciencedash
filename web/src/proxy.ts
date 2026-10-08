@@ -52,7 +52,7 @@ export function proxy(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
   if (isPublic(pathname)) return NextResponse.next();
 
-  // 1. Bearer (sync.py + workhorse Claudes via mcp-config headers).
+  // 1. Bearer (bridges, ambient transcript shipping and sd.py).
   if (verifyBearer(request.headers.get("authorization"))) {
     return NextResponse.next();
   }

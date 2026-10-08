@@ -102,7 +102,7 @@ Tools are invoked through the \`sciencedash\` skill: \`sd.py call <name> '<json-
    - Fetch full state via \`get_entity(kind="project", id=...)\`. Note: missing primary metric, missing hypothesis, missing figuresOfMerit (these block §16.1 promotion / clean reporting).
    - Fetch hypotheses: \`query_entity(kind="hypothesis", projectId=...)\`. Flag any where \`computeUsedGpuHours > computeBudgetGpuHours\` (overspend without a budget_escalate decision).
    - Fetch repo links: \`query_entity(kind="repo_link", projectId=...)\`. Flag repos where \`cachedLastCommitAt\` is more than 7 days ago. Optionally call \`refresh_repo(projectId=...)\` first to make sure the cache is fresh.
-   - Fetch workhorses: \`query_entity(kind="workhorse", projectId=...)\`. Flag any in state "dead" or "unreachable" — they should be restarted.
+   - Fetch workhorses: \`query_entity(kind="workhorse", projectId=...)\`. Flag any in state "needs_recreate" or "bridge_down" — check bridge health or create and register a replacement session.
 
 2. **Blocked projects**: \`query_entity(kind="project", status="blocked")\`. List each with its \`blockers\` text. If any blocker text looks like it might be resolved (e.g. dated language), surface it for the user to verify.
 
@@ -110,7 +110,7 @@ Tools are invoked through the \`sciencedash\` skill: \`sd.py call <name> '<json-
 
 ## Output
 
-A markdown list of issues, severity-sorted (compute overrun > dead workhorse > stale repo > stalled project > missing metric). For each: project name + the issue + a recommended action (often a tool call you can run for them with confirmation).
+A markdown list of issues, severity-sorted (compute overrun > unavailable workhorse > stale repo > stalled project > missing metric). For each: project name + the issue + a recommended action (often a tool call you can run for them with confirmation).
 
 If everything is healthy, say so plainly in one line. Don't pad.
 `;
