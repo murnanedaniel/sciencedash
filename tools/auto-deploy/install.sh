@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 #
-# One-shot installer for the ScienceDash auto-deploy timer. Run this on
+# One-shot installer for the ScienceDash production server and auto-deploy timer. Run this on
 # your dashboard server once. Idempotent — re-running it just refreshes the
 # unit files in case they've changed.
 #
 # Prereqs:
 #   - gh CLI installed and authenticated (gh auth login, web flow)
-#   - the existing sciencedash.service (the dev server) already running
+#   - the existing sciencedash.service can keep running until the first build succeeds
 #   - fnm + Node 22 set up
 #   - this repo cloned somewhere; set SCIENCEDASH_REPO_ROOT if it isn't at
 #     ~/sciencedash, and SCIENCEDASH_REPO_SLUG to your-org/your-repo
-#   - edit sciencedash-deploy.service's ExecStart/Environment to match
+#   - edit sciencedash-deploy.service's ExecStart/Environment and
+#     sciencedash.service's WorkingDirectory to match the same checkout
 #
 # Usage:
 #   bash <repo>/tools/auto-deploy/install.sh
@@ -21,12 +22,15 @@ SRC=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 DEST="$HOME/.config/systemd/user"
 REPO_ROOT="${SCIENCEDASH_REPO_ROOT:-$HOME/sciencedash}"
 
-echo "Installing auto-deploy units → $DEST"
+echo "Installing production server and auto-deploy units → $DEST"
 mkdir -p "$DEST"
+cp "$SRC/sciencedash.service" "$DEST/sciencedash.service"
 cp "$SRC/sciencedash-deploy.service" "$DEST/sciencedash-deploy.service"
 cp "$SRC/sciencedash-deploy.timer" "$DEST/sciencedash-deploy.timer"
 
 systemctl --user daemon-reload
+# The deploy script bootstraps the first production build before restarting
+# sciencedash; don't restart it here while there may be no build available.
 systemctl --user enable --now sciencedash-deploy.timer
 
 echo
