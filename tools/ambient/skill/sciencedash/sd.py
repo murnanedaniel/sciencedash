@@ -12,6 +12,7 @@ Commands:
   sd.py projects                    list active projects
   sd.py context <projectId>         a project's brief (status, hypothesis, next steps, metrics)
   sd.py log-decision <projectId> "<rationale>"   record a decision on a project
+  sd.py attach-poster <noteId> <file.html>   upload a super-poster
   sd.py call <tool> '<json-args>'   invoke ANY ScienceDash tool by name (full surface)
 stdlib only.
 """
@@ -100,6 +101,17 @@ def cmd_log_decision(project_id, rationale):
     return 0
 
 
+def cmd_attach_poster(note_id, filename):
+    try:
+        html = Path(filename).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as e:
+        print(f"error: {e}")
+        return 1
+    res = tool("attach_poster", {"noteId": note_id, "html": html})
+    _print(res)
+    return 1 if res.get("error") else 0
+
+
 def cmd_call(name, args_json):
     try:
         args = json.loads(args_json) if args_json else {}
@@ -136,6 +148,8 @@ def main(argv):
         return cmd_context(argv[2])
     if cmd == "log-decision" and len(argv) >= 4:
         return cmd_log_decision(argv[2], " ".join(argv[3:]))
+    if cmd == "attach-poster" and len(argv) == 4:
+        return cmd_attach_poster(argv[2], argv[3])
     if cmd == "call" and len(argv) >= 3:
         return cmd_call(argv[2], argv[3] if len(argv) > 3 else "{}")
     print(__doc__)

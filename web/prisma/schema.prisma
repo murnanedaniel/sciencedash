@@ -473,6 +473,7 @@ model Note {
   arxivId    String?
   summaryMd  String?
   takeaway   String?
+  posterPath String?
 
   projects   NoteProject[]
 }

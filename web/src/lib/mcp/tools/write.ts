@@ -6,6 +6,8 @@
  * intent-named; "log a check-in", not "create a row".
  */
 
+import { rm } from "node:fs/promises";
+import { posterFilePath, posterUrl, readPosterInput, storePoster } from "@/lib/server/posters";
 import { prisma } from "@/lib/prisma";
 import { jsonResult, optString, requireString } from "@/lib/mcp/server";
 import type { ToolDefinition } from "@/lib/mcp/types";
@@ -243,6 +245,48 @@ const addNote: ToolDefinition = {
       },
     });
     return jsonResult({ id: note.id, createdAt: note.createdAt, url });
+  },
+};
+
+const attachPoster: ToolDefinition = {
+  name: "attach_poster",
+  description: "Attach a self-contained super-poster HTML file to a reading-list note (maximum 2 MB). Provide exactly one of html (remote upload) or htmlPath (absolute path on the server). Inline CSS/SVG and one inline script; no external requests. Served with an opaque-origin sandbox.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      noteId: { type: "string" },
+      htmlPath: { type: "string", description: "Absolute path on the server machine." },
+      html: { type: "string", description: "Raw HTML for remote uploads." },
+    },
+    required: ["noteId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const noteId = requireString(args, "noteId");
+    const note = await prisma.note.findUnique({ where: { id: noteId }, select: { id: true } });
+    if (!note) throw new Error(`note not found: ${noteId}`);
+    const html = await readPosterInput(args);
+    const posterPath = await storePoster(noteId, html);
+    await prisma.note.update({ where: { id: noteId }, data: { posterPath } });
+    return jsonResult({ noteId, posterUrl: posterUrl(noteId) });
+  },
+};
+
+const detachPoster: ToolDefinition = {
+  name: "detach_poster",
+  description: "Remove a note's super-poster and its stored HTML file.",
+  inputSchema: {
+    type: "object",
+    properties: { noteId: { type: "string" } },
+    required: ["noteId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const noteId = requireString(args, "noteId");
+    const path = posterFilePath(noteId);
+    await prisma.note.update({ where: { id: noteId }, data: { posterPath: null } });
+    await rm(path, { force: true });
+    return jsonResult({ noteId, detached: true });
   },
 };
 
@@ -1226,6 +1270,8 @@ export const writeTools: ToolDefinition[] = [
   createCheckIn,
   recordDecision,
   addNote,
+  attachPoster,
+  detachPoster,
   updateHypothesisStatus,
   moveRunToHypothesis,
   updateEntity,

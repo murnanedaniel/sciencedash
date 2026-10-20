@@ -88,6 +88,11 @@ export default async function ReadingPage() {
                     {n.url ? (
                       <a className="pill" href={n.url} target="_blank" rel="noreferrer">link</a>
                     ) : null}
+                    {n.posterPath ? (
+                      <Link className="button buttonSecondary" href={`/reading/${n.id}/poster`}>
+                        Super-poster
+                      </Link>
+                    ) : null}
                     <span className="muted small">{daysAgoLabel(n.createdAt)}</span>
                   </div>
                 </div>
