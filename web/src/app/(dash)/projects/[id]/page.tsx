@@ -729,6 +729,11 @@ async function LiteratureTab({ projectId }: { projectId: string }) {
                   {n.url && !n.arxivId ? (
                     <a className="pill link" href={n.url} target="_blank" rel="noreferrer">link</a>
                   ) : null}
+                  {n.posterPath ? (
+                    <Link className="button buttonSecondary" href={`/reading/${n.id}/poster`}>
+                      Super-poster
+                    </Link>
+                  ) : null}
                   <span className="muted small">{daysAgoLabel(n.createdAt)}</span>
                 </div>
                 {n.authors ? (

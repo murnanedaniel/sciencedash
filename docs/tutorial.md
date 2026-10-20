@@ -403,3 +403,38 @@ Brains and workers communicate **only via the project DB** (read+write through M
 ## Architecture decisions
 
 ScienceDash v2 was specified in `~/.claude/plans/yup-merge-in-then-atomic-breeze.md` and shipped in commits `2d58e3d` through `16b32ae` (April 2026). The plan file captures the design conversation — read it for the *why* behind these choices.
+
+### Reading-list super-posters
+
+A super-poster explains a paper in about three minutes as a self-contained HTML
+file: inline CSS, inline SVG, one inline script, and no external requests. Attach
+it to an existing reading-list note with:
+
+```sh
+sd.py attach-poster <noteId> <file.html>
+# Or use the generic tool interface on the server:
+sd.py call attach_poster '{"noteId":"<noteId>","htmlPath":"/absolute/path/poster.html"}'
+sd.py call detach_poster '{"noteId":"<noteId>"}'
+```
+
+`attach_poster` accepts exactly one of `htmlPath` (on the dashboard server) or
+`html` (raw HTML, used by the convenience command for remote uploads). It checks
+that the note exists, limits UTF-8 content to 2 MiB, requires an HTML/doctype
+prefix, and rejects common external script, stylesheet, network and iframe
+patterns. It returns `{noteId, posterUrl}`. Reattaching replaces the poster;
+detaching clears the reference and deletes the file. Files live at
+`web/.data/posters/<noteId>.html` when running from `web`, configurable with
+`SCIENCEDASH_POSTERS_DIR`. Apply the `note_poster_path` migration through the
+normal deployment process before using this feature.
+
+The Reading page and project reading lists show a **Super-poster** button.
+The viewer embeds `/api/posters/<noteId>` in an iframe with only
+`sandbox="allow-scripts"` and no referrer. Cookie or bearer authentication is
+required by the existing proxy. The response also carries CSP `sandbox
+allow-scripts`, giving it an opaque origin even when opened directly via
+**Open full screen**. CSP blocks external resources and connections, base URLs
+and form submissions; only inline styles/scripts and data images/fonts are
+allowed. Posters cannot access the dashboard's origin, cookies or API responses.
+The upload string checks are defence in depth, not a sanitizer or the security
+boundary: isolation comes from the browser sandbox and CSP. Never render poster
+HTML directly into the dashboard DOM or add `allow-same-origin` to the sandbox.
