@@ -415,6 +415,8 @@ sd.py attach-poster <noteId> <file.html>
 # Or use the generic tool interface on the server:
 sd.py call attach_poster '{"noteId":"<noteId>","htmlPath":"/absolute/path/poster.html"}'
 sd.py call detach_poster '{"noteId":"<noteId>"}'
+sd.py delete-note <noteId>
+sd.py call delete_note '{"noteId":"<noteId>","confirmTitle":"Exact note title"}'
 ```
 
 `attach_poster` accepts exactly one of `htmlPath` (on the dashboard server) or
@@ -422,7 +424,9 @@ sd.py call detach_poster '{"noteId":"<noteId>"}'
 that the note exists, limits UTF-8 content to 2 MiB, requires an HTML/doctype
 prefix, and rejects common external script, stylesheet, network and iframe
 patterns. It returns `{noteId, posterUrl}`. Reattaching replaces the poster;
-detaching clears the reference and deletes the file. Files live at
+detaching clears the reference and deletes the file. `delete_note` permanently
+deletes the note, its project links, and its poster file. Pass `confirmTitle` to
+require an exact title match before deletion. Files live at
 `web/.data/posters/<noteId>.html` when running from `web`, configurable with
 `SCIENCEDASH_POSTERS_DIR`. Apply the `note_poster_path` migration through the
 normal deployment process before using this feature.

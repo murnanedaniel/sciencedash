@@ -309,6 +309,34 @@ const detachPoster: ToolDefinition = {
   },
 };
 
+const deleteNote: ToolDefinition = {
+  name: "delete_note",
+  description: "Permanently delete a reading-list Note and its super-poster file. Pass confirmTitle to guard against deleting the wrong note.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      noteId: { type: "string" },
+      confirmTitle: { type: "string" },
+    },
+    required: ["noteId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const noteId = requireString(args, "noteId");
+    const note = await prisma.note.findUnique({
+      where: { id: noteId },
+      select: { id: true, title: true, posterPath: true },
+    });
+    if (!note) throw new Error(`note not found: ${noteId}`);
+    if (args.confirmTitle !== undefined && args.confirmTitle !== note.title) {
+      throw new Error(`confirmTitle mismatch for note: ${noteId}`);
+    }
+    await prisma.note.delete({ where: { id: noteId } });
+    if (note.posterPath) await rm(posterFilePath(noteId), { force: true });
+    return jsonResult({ noteId, title: note.title, deleted: true });
+  },
+};
+
 const attachCheckInHtml: ToolDefinition = {
   name: "attach_checkin_html",
   description: "Attach a self-contained HTML deck or figure page to a check-in (maximum 2 MB). Provide exactly one of html (remote upload) or htmlPath (absolute path on the server). No external requests. Served with an opaque-origin sandbox.",
@@ -1338,6 +1366,7 @@ export const writeTools: ToolDefinition[] = [
   addNote,
   attachPoster,
   detachPoster,
+  deleteNote,
   attachCheckInHtml,
   detachCheckInHtml,
   updateHypothesisStatus,
