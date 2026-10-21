@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { rm } from "node:fs/promises";
 import { prisma } from "@/lib/prisma";
+import { posterFilePath } from "@/lib/server/posters";
 import type { NoteKind } from "@/generated/prisma/client";
 
 function extractArxivId(s: string): string | null {
@@ -41,7 +43,8 @@ export async function createNote(formData: FormData) {
 }
 
 export async function deleteNote(id: string) {
-  await prisma.note.delete({ where: { id } });
+  const note = await prisma.note.delete({ where: { id } });
+  if (note.posterPath) await rm(posterFilePath(id), { force: true });
   revalidatePath("/reading");
 }
 
