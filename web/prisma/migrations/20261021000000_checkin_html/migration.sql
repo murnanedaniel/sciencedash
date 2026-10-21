@@ -1,0 +1,2 @@
+ALTER TABLE "CheckIn" ADD COLUMN "htmlPath" TEXT;
+ALTER TABLE "CheckIn" ADD COLUMN "htmlTitle" TEXT;

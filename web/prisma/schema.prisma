@@ -546,6 +546,10 @@ model CheckIn {
   project             Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   bodyMd              String
+  /// Stored self-contained HTML attachment, served in a sandbox.
+  htmlPath            String?
+  /// Optional display title for the HTML attachment.
+  htmlTitle           String?
   source              String    @default("manual")
   proposedPatchJson   String?
 }
