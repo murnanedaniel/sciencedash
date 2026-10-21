@@ -7,7 +7,7 @@
  */
 
 import { rm } from "node:fs/promises";
-import { posterFilePath, posterUrl, readPosterInput, storePoster } from "@/lib/server/posters";
+import { checkInHtmlUrl, posterFilePath, posterUrl, readPosterInput, removeCheckInHtml, storeCheckInHtml, storePoster } from "@/lib/server/posters";
 import { prisma } from "@/lib/prisma";
 import { jsonResult, optString, requireString } from "@/lib/mcp/server";
 import type { ToolDefinition } from "@/lib/mcp/types";
@@ -60,15 +60,26 @@ const NARRATIVE_READINESS = [
   "ready_to_submit",
 ] as const;
 
+function attachmentTitle(args: Record<string, unknown>, key: string): string | null {
+  if (!(key in args)) return null;
+  const title = args[key];
+  if (typeof title !== "string" || title.length > 120) {
+    throw new Error(`${key} must be a string of at most 120 characters`);
+  }
+  return title;
+}
+
 const createCheckIn: ToolDefinition = {
   name: "create_check_in",
   description:
-    "Append a CheckIn to a project — the canonical surface for prose status updates, plan adoption, blocker escalation, and retros. Use `kind: 'plan'` when you're recording a multi-step plan; pair with `proposedPatches` to update project fields (timeline, nextSteps, blockers, figuresOfMerit) atomically. Prefer this over `add_note` for non-paper content.",
+    "Append a CheckIn to a project — the canonical surface for prose status updates, plan adoption, blocker escalation, and retros. Use `kind: 'plan'` when you're recording a multi-step plan; pair with `proposedPatches` to update project fields (timeline, nextSteps, blockers, figuresOfMerit) atomically. Prefer this over `add_note` for non-paper content. Optionally provide html to attach a deck or figure page.",
   inputSchema: {
     type: "object",
     properties: {
       projectId: { type: "string" },
       body: { type: "string", description: "Markdown body. Keep it terse and decision-shaped." },
+      html: { type: "string", description: "Self-contained HTML deck or figure page (maximum 2 MB)." },
+      htmlTitle: { type: "string", description: "Optional attachment title (at most 120 characters)." },
       kind: {
         type: "string",
         enum: [...CHECKIN_KIND],
@@ -117,6 +128,8 @@ const createCheckIn: ToolDefinition = {
     if (Array.isArray(proposed) && proposed.length > 0) {
       proposedPatchJson = JSON.stringify({ proposedPatches: proposed });
     }
+    const html = "html" in args ? await readPosterInput({ html: args.html }) : undefined;
+    const htmlTitle = attachmentTitle(args, "htmlTitle");
     const checkIn = await prisma.checkIn.create({
       data: {
         project: { connect: { id: projectId } },
@@ -127,7 +140,13 @@ const createCheckIn: ToolDefinition = {
         proposedPatchJson,
       },
     });
-    return jsonResult({ id: checkIn.id, createdAt: checkIn.createdAt, kind });
+    let viewerUrl: string | undefined;
+    if (html !== undefined) {
+      const htmlPath = await storeCheckInHtml(checkIn.id, html);
+      await prisma.checkIn.update({ where: { id: checkIn.id }, data: { htmlPath, htmlTitle } });
+      viewerUrl = `/projects/${projectId}/checkins/${checkIn.id}`;
+    }
+    return jsonResult({ id: checkIn.id, createdAt: checkIn.createdAt, kind, ...(viewerUrl ? { viewerUrl } : {}) });
   },
 };
 
@@ -287,6 +306,53 @@ const detachPoster: ToolDefinition = {
     await prisma.note.update({ where: { id: noteId }, data: { posterPath: null } });
     await rm(path, { force: true });
     return jsonResult({ noteId, detached: true });
+  },
+};
+
+const attachCheckInHtml: ToolDefinition = {
+  name: "attach_checkin_html",
+  description: "Attach a self-contained HTML deck or figure page to a check-in (maximum 2 MB). Provide exactly one of html (remote upload) or htmlPath (absolute path on the server). No external requests. Served with an opaque-origin sandbox.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      checkInId: { type: "string" },
+      htmlPath: { type: "string", description: "Absolute path on the server machine." },
+      html: { type: "string", description: "Raw HTML for remote uploads." },
+      title: { type: "string", description: "Optional attachment title (at most 120 characters)." },
+    },
+    required: ["checkInId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const checkInId = requireString(args, "checkInId");
+    const checkIn = await prisma.checkIn.findUnique({ where: { id: checkInId }, select: { projectId: true } });
+    if (!checkIn) throw new Error(`check-in not found: ${checkInId}`);
+    const htmlTitle = attachmentTitle(args, "title");
+    const html = await readPosterInput(args);
+    const htmlPath = await storeCheckInHtml(checkInId, html);
+    await prisma.checkIn.update({ where: { id: checkInId }, data: { htmlPath, htmlTitle } });
+    return jsonResult({
+      checkInId,
+      url: checkInHtmlUrl(checkInId),
+      viewerUrl: checkIn.projectId ? `/projects/${checkIn.projectId}/checkins/${checkInId}` : null,
+    });
+  },
+};
+
+const detachCheckInHtml: ToolDefinition = {
+  name: "detach_checkin_html",
+  description: "Remove a check-in's HTML attachment and its stored file.",
+  inputSchema: {
+    type: "object",
+    properties: { checkInId: { type: "string" } },
+    required: ["checkInId"],
+    additionalProperties: false,
+  },
+  async handler(args) {
+    const checkInId = requireString(args, "checkInId");
+    await prisma.checkIn.update({ where: { id: checkInId }, data: { htmlPath: null, htmlTitle: null } });
+    await removeCheckInHtml(checkInId);
+    return jsonResult({ checkInId, detached: true });
   },
 };
 
@@ -1272,6 +1338,8 @@ export const writeTools: ToolDefinition[] = [
   addNote,
   attachPoster,
   detachPoster,
+  attachCheckInHtml,
+  detachCheckInHtml,
   updateHypothesisStatus,
   moveRunToHypothesis,
   updateEntity,

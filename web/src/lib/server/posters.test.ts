@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { MAX_POSTER_BYTES, posterFilePath, posterHeaders, readPosterInput, validatePoster } from "./posters";
+import { checkInHtmlFilePath, checkInHtmlUrl, removeCheckInHtml, storeCheckInHtml, POSTERS_DIR, MAX_POSTER_BYTES, posterFilePath, posterHeaders, readPosterInput, validatePoster } from "./posters";
 
 const minimal = "<!doctype html><html><body><h1>Paper</h1><script>document.title = 'Paper';</script></body></html>";
 
@@ -64,4 +65,31 @@ test("poster headers sandbox direct navigation and prohibit external requests", 
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "private, max-age=60",
   });
+});
+
+test("check-in HTML paths validate IDs and use a separate directory", () => {
+  assert.equal(checkInHtmlFilePath("Check-in_123"), join(POSTERS_DIR, "checkins", "Check-in_123.html"));
+  assert.equal(checkInHtmlUrl("check-in_123"), "/api/checkin-html/check-in_123");
+  for (const id of ["", "../escape", "/absolute", "a/b", "a\\b", "a.html"]) {
+    assert.throws(() => checkInHtmlFilePath(id), /invalid checkInId/);
+  }
+});
+
+test("check-in HTML stores, replaces and removes files", async () => {
+  const id = `test-${randomUUID()}`;
+  const path = checkInHtmlFilePath(id);
+  try {
+    assert.equal(await storeCheckInHtml(id, minimal), path);
+    assert.equal(await readFile(path, "utf8"), minimal);
+    const replacement = "<html><body>Updated deck</body></html>";
+    await storeCheckInHtml(id, replacement);
+    assert.equal(await readFile(path, "utf8"), replacement);
+    await assert.rejects(storeCheckInHtml(id, '<html><script src="https://example.com/a.js"></script></html>'), /external requests/);
+    assert.equal(await readFile(path, "utf8"), replacement);
+    await removeCheckInHtml(id);
+    await assert.rejects(readFile(path), { code: "ENOENT" });
+    await removeCheckInHtml(id);
+  } finally {
+    await removeCheckInHtml(id);
+  }
 });

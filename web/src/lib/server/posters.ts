@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 export const POSTERS_DIR =
   process.env.SCIENCEDASH_POSTERS_DIR ?? join(process.cwd(), ".data", "posters");
@@ -13,6 +13,24 @@ export function posterFilePath(noteId: string): string {
 
 export function posterUrl(noteId: string): string {
   return `/api/posters/${encodeURIComponent(noteId)}`;
+}
+
+export function checkInHtmlFilePath(checkInId: string): string {
+  if (!/^[a-z0-9_-]+$/i.test(checkInId)) throw new Error("invalid checkInId");
+  return join(POSTERS_DIR, "checkins", `${checkInId}.html`);
+}
+
+export function checkInHtmlUrl(checkInId: string): string {
+  return `/api/checkin-html/${encodeURIComponent(checkInId)}`;
+}
+
+export async function storeCheckInHtml(checkInId: string, html: string): Promise<string> {
+  validatePoster(html);
+  return storeHtml(checkInHtmlFilePath(checkInId), html);
+}
+
+export async function removeCheckInHtml(checkInId: string): Promise<void> {
+  await rm(checkInHtmlFilePath(checkInId), { force: true });
 }
 
 export function validatePoster(html: string): void {
@@ -66,8 +84,11 @@ export async function readPosterInput(args: Record<string, unknown>): Promise<st
 
 export async function storePoster(noteId: string, html: string): Promise<string> {
   validatePoster(html);
-  const path = posterFilePath(noteId);
-  await mkdir(POSTERS_DIR, { recursive: true });
+  return storeHtml(posterFilePath(noteId), html);
+}
+
+async function storeHtml(path: string, html: string): Promise<string> {
+  await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, html, { encoding: "utf8", flag: "wx", mode: 0o600 });

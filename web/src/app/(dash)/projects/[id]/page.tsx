@@ -974,6 +974,8 @@ async function ActivityTab({ projectId }: { projectId: string }) {
     kind: string;
     title: string;
     sub?: string;
+    href?: string;
+    hrefLabel?: string;
     /** When true, render `title` as markdown with collapse. */
     markdown?: boolean;
   };
@@ -996,6 +998,8 @@ async function ActivityTab({ projectId }: { projectId: string }) {
       kind: c.source === "ai" ? "ai-review" : "check-in",
       title: c.bodyMd,
       sub: c.source,
+      href: c.htmlPath ? `/projects/${projectId}/checkins/${c.id}` : undefined,
+      hrefLabel: c.htmlTitle ?? "Open attachment",
       markdown: true,
     })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
@@ -1019,6 +1023,7 @@ async function ActivityTab({ projectId }: { projectId: string }) {
                 r.title
               )}
             </div>
+            {r.href ? <Link className="link" href={r.href}>▶ {r.hrefLabel}</Link> : null}
           </div>
         </div>
       ))}

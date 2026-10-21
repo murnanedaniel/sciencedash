@@ -13,6 +13,8 @@ Commands:
   sd.py context <projectId>         a project's brief (status, hypothesis, next steps, metrics)
   sd.py log-decision <projectId> "<rationale>"   record a decision on a project
   sd.py attach-poster <noteId> <file.html>   upload a super-poster
+  sd.py attach-checkin-html <checkInId> <file.html> [title]   upload a deck or figure page
+  sd.py detach-checkin-html <checkInId>   remove an HTML attachment
   sd.py call <tool> '<json-args>'   invoke ANY ScienceDash tool by name (full surface)
 stdlib only.
 """
@@ -112,6 +114,26 @@ def cmd_attach_poster(note_id, filename):
     return 1 if res.get("error") else 0
 
 
+def cmd_attach_checkin_html(checkin_id, filename, title=None):
+    try:
+        html = Path(filename).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as e:
+        print(f"error: {e}")
+        return 1
+    args = {"checkInId": checkin_id, "html": html}
+    if title is not None:
+        args["title"] = title
+    res = tool("attach_checkin_html", args)
+    _print(res)
+    return 1 if res.get("error") else 0
+
+
+def cmd_detach_checkin_html(checkin_id):
+    res = tool("detach_checkin_html", {"checkInId": checkin_id})
+    _print(res)
+    return 1 if res.get("error") else 0
+
+
 def cmd_call(name, args_json):
     try:
         args = json.loads(args_json) if args_json else {}
@@ -150,6 +172,10 @@ def main(argv):
         return cmd_log_decision(argv[2], " ".join(argv[3:]))
     if cmd == "attach-poster" and len(argv) == 4:
         return cmd_attach_poster(argv[2], argv[3])
+    if cmd == "attach-checkin-html" and len(argv) in (4, 5):
+        return cmd_attach_checkin_html(argv[2], argv[3], argv[4] if len(argv) == 5 else None)
+    if cmd == "detach-checkin-html" and len(argv) == 3:
+        return cmd_detach_checkin_html(argv[2])
     if cmd == "call" and len(argv) >= 3:
         return cmd_call(argv[2], argv[3] if len(argv) > 3 else "{}")
     print(__doc__)

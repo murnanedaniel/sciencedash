@@ -221,7 +221,7 @@ Currently exposes ~20 tools across read / write / dispatch / spawn:
 
 ### Write
 
-`create_check_in`, `record_decision`, `add_note`, `update_hypothesis_status`, `move_run_to_hypothesis`, `post_message`, `mark_message_read`, `register_rc_workhorse`, `resume_workhorse`, `stop_all_workhorses`, `remove_workhorse`.
+`create_check_in`, `attach_checkin_html`, `detach_checkin_html`, `record_decision`, `add_note`, `update_hypothesis_status`, `move_run_to_hypothesis`, `post_message`, `mark_message_read`, `register_rc_workhorse`, `resume_workhorse`, `stop_all_workhorses`, `remove_workhorse`.
 
 ### Dispatch (autonomy-gated)
 
@@ -438,3 +438,31 @@ allowed. Posters cannot access the dashboard's origin, cookies or API responses.
 The upload string checks are defence in depth, not a sanitizer or the security
 boundary: isolation comes from the browser sandbox and CSP. Never render poster
 HTML directly into the dashboard DOM or add `allow-same-origin` to the sandbox.
+
+### Check-in HTML attachments
+
+Check-ins can carry one self-contained HTML deck or figure page using the same
+2 MB limit, validation, sandbox and CSP as super-posters. Both the viewer and
+HTML endpoint require authentication.
+
+```bash
+sd.py attach-checkin-html <checkInId> <file.html> "Weekly slides"
+sd.py call attach_checkin_html '{"checkInId":"<id>","htmlPath":"/absolute/path/deck.html","title":"Weekly slides"}'
+sd.py detach-checkin-html <checkInId>
+# Equivalent tool call:
+sd.py call detach_checkin_html '{"checkInId":"<id>"}'
+```
+
+`attach_checkin_html` accepts exactly one of `html` or `htmlPath`, plus an optional
+`title` (at most 120 characters), and returns `{checkInId, url, viewerUrl}`.
+Reattaching replaces the file and title; detaching clears both fields and removes
+the file. For check-ins without a project, `viewerUrl` is null.
+`create_check_in` also accepts `html` and `htmlTitle` to attach a deck or figure
+page during creation, validates HTML before creating the check-in, and returns
+`viewerUrl` when attached.
+
+The project activity timeline links to `/projects/<id>/checkins/<checkInId>`.
+HTML is served at `/api/checkin-html/<checkInId>` and stored under
+`${SCIENCEDASH_POSTERS_DIR}/checkins/<checkInId>.html` (default:
+`web/.data/posters/checkins/`). Apply the `checkin_html` migration through the
+normal deployment migration process before using these tools.
